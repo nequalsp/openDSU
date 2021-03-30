@@ -37,8 +37,8 @@ ssize_t read_fd(int fd, void *ptr, size_t nbytes, int *recvfd) {
 	#ifdef  HAVE_MSGHDR_MSG_CONTROL
 	if ( (cmptr = CMSG_FIRSTHDR(&msg)) != NULL &&
 		cmptr->cmsg_len == CMSG_LEN(sizeof(int))) {
-		if (cmptr->cmsg_level != SOL_SOCKET)
-			err_quit("control level != SOL_SOCKET");
+		if (cmptr->cmsg_level != SOL_SOCKET) {
+			perror("control level != SOL_SOCKET");
 		if (cmptr->cmsg_type != SCM_RIGHTS)
 			err_quit("control type != SCM_RIGHTS");
 		*recvfd = *((int *) CMSG_DATA(cmptr));
@@ -88,16 +88,5 @@ ssize_t write_fd(int fd, void *ptr, size_t nbytes, int sendfd) {
 
 	return (sendmsg(fd, &msg, 0));
 }
-
-
-// example of a handler which checks the signalling pid
-//void handler(int sig, siginfo_t* info, void* vp) { 
-//  if (info->si_pid != getpid()) {
-    // not from me (or my call to alarm)
-//    return;
-//  }
-  // from me.  let me know alarm when off
-//  alarmWentOff = 1;
-//} 
 
 
