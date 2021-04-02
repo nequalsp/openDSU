@@ -14,11 +14,10 @@
 #define MAXMSG  512
 
 int main (int argc, char **argv) {
-    
+    unlink(DSU_COMM);
     DSU_INIT;
     
 	/* Create the socket. */
-    printf("0\n");
 	struct sockaddr_in name;
 	int sock = socket(PF_INET, SOCK_STREAM, 0);
 	if (sock < 0) {

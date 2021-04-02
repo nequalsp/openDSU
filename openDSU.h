@@ -21,10 +21,9 @@ struct dsu_sockets_struct {
 
 void dsu_sockets_add(struct dsu_sockets_struct *socket, struct dsu_socket_struct value) {
     /* implement check on port. */        
-
     struct dsu_sockets_struct *new_socket = (struct dsu_sockets_struct *) malloc(sizeof(struct dsu_sockets_struct));
     memcpy(&new_socket->value, &value, sizeof(struct dsu_socket_struct));
-
+    printf("add_socket %d to binds\n", new_socket->value.sockfd);
     while (socket->next != NULL) {
         socket = socket->next;
     }
@@ -51,21 +50,22 @@ void dsu_sockets_remove(struct dsu_sockets_struct *socket, int sockfd) {
 
 struct dsu_socket_struct *dsu_sockets_search_fd(struct dsu_sockets_struct *socket, int sockfd) {
     
-    while (socket->next != NULL) {
-        printf("test\n");
+    do {
         if (socket->value.sockfd == sockfd) return &socket->value;
         socket = socket->next;
-    }
+    } while (socket != NULL);
+    
     return NULL;
 
 }
 
 struct dsu_socket_struct *dsu_sockets_search_port(struct dsu_sockets_struct *socket, int port) {
-
-    while (socket->next != NULL) {
+    
+    do {
         if (socket->value.port == port) return &socket->value;
         socket = socket->next;
-    }
+    } while (socket != NULL);
+    
     return NULL;
 
 }
@@ -96,9 +96,9 @@ dsu_state dsu_program_state;
 /********************* Communication *********************/
 #define HAVE_MSGHDR_MSG_CONTROL 1
 #define DSU_COMM "/tmp/dsu_comm.unix"
-#define DSU_COMM_LEN 13
+#define DSU_COMM_LEN 18
 void dsu_open_communication(void) {
-        
+    
     /* Create Unix domain socket. */
     dsu_program_state.sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
     bzero(&dsu_program_state.sockfd_addr, sizeof(dsu_program_state.sockfd_addr));
@@ -108,9 +108,10 @@ void dsu_open_communication(void) {
     /* Bind socket, if it fails and already exists we know that another DSU application is 
        already running. These applications need to know each others listening ports. */
     if ( bind(dsu_program_state.sockfd, (struct sockaddr *) &dsu_program_state.sockfd_addr, (socklen_t) sizeof(dsu_program_state.sockfd_addr)) != 0) {
-        if ( errno == EINVAL ) {
+        if ( errno == EADDRINUSE ) {
             /* Other DSU application is running, ask for binded ports. */
             dsu_program_state.version = DSU_NEW_VERSION;
+            printf("NEW_VERSION\n");
             return;
         } else {
             perror("bind");
@@ -119,12 +120,18 @@ void dsu_open_communication(void) {
     }
     
     /* Normal execution */
+    printf("RUNNING_VERSION\n");
     dsu_program_state.version = DSU_RUNNING_VERSION;
     listen(dsu_program_state.sockfd, 1);
     return;
 }
 
-ssize_t write_fd(int fd, void *ptr, int nbytes, int sendfd) {
+int dsu_write_fd(int fd, int sendfd, int port) {
+    
+    int32_t nport = htonl(port);
+    char *ptr = (char*)&nport;
+    int nbytes = sizeof(nport);
+
 	struct msghdr msg;
 	struct iovec iov[1];
 
@@ -159,10 +166,15 @@ ssize_t write_fd(int fd, void *ptr, int nbytes, int sendfd) {
 	return (sendmsg(fd, &msg, 0));
 }
 
-ssize_t read_fd(int fd, void *ptr, int nbytes, int *recvfd) {
+int dsu_read_fd(int fd, int *recvfd, int *port) {
+    
+    int32_t nport;
+    char *ptr = (char*)&nport;
+    int nbytes = sizeof(nport);
+
 	struct msghdr msg;
 	struct iovec iov[1];
-	ssize_t n;
+	int n;
 
 	#ifdef HAVE_MSGHDR_MSG_CONTROL
 	union {
@@ -209,13 +221,68 @@ ssize_t read_fd(int fd, void *ptr, int nbytes, int *recvfd) {
 	else
 		*recvfd = -1;   /* descriptor was not passed */
 	#endif
-
+    
+    *port = ntohl(nport);
 	return (n);
 }
 
+int dsu_write_port(int fd, int port)
+{
+    /* Also handle partial writes. */
+    int32_t nport = htonl(port);
+    char *data = (char*)&nport;
+    int bytes = sizeof(nport);
+    int ret;
+    printf("data1: %d\n", port);
+    printf("data: %d\n", nport);
+    do {
+        ret = write(fd, data, bytes);
+        if (ret < 0) {
+            if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+                // use select() or epoll() to do!!!
+            }
+            else if (errno != EINTR) {
+                return -1;
+            }
+        }
+        else {
+            data += ret; // Address offset.
+            bytes -= ret;// Bytes to send.
+        }
+    }
+    while (bytes > 0);
+    return 0;
+}
+
+int dsu_read_port(int fd, int *port)
+{
+    int32_t nport;
+    char *data = (char*)&nport;
+    int bytes = sizeof(nport);
+    int ret;
+    do {
+        ret = read(fd, data, bytes);
+        if (ret <= 0) {
+            if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
+                // use select() or epoll() to do!
+            }
+            else if (errno != EINTR) {
+                return -1;
+            }
+        }
+        else {
+            data += ret;//Address offset.
+            bytes -= ret;//Bytes to read.
+        }
+    }
+    while (bytes > 0);
+    printf("test port %d\n", nport);
+    *port = ntohl(nport);
+    return 0;
+}
 /*********************************************************/
 
-/********************* POSIX *****************************/
+/********************* POSprintf("add_socket %d to binds\n", new_socket->value.sockfd);IX *****************************/
 void dsu_init() {
     
     dsu_program_state.version = DSU_RUNNING_VERSION;
@@ -255,24 +322,28 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     /* Find corresponding socket metadata and update it. */
     struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd); 
     if (dsu_socketfd == NULL) return -1; // Set error in future
-
+    
     struct sockaddr_in *addr_t; addr_t = addr;
     dsu_socketfd->port = ntohs(addr_t->sin_port); // !Explain the assumption here! 
-    
+    printf("bind socket %d to port %d\n", sockfd, dsu_socketfd->port);
     if (dsu_program_state.version == DSU_NEW_VERSION) {
-
+        printf("Ask port %d to current version\n", dsu_socketfd->port);
         /* Connect to the old version and request for file descriptor. */
+        printf("Connect to RUNNING_VERSION\n");
         connect(dsu_program_state.sockfd, &dsu_program_state.sockfd_addr, sizeof(dsu_program_state.sockfd_addr));
-        send(dsu_program_state.sockfd, &dsu_socketfd->port, 1, MSG_CONFIRM);
+        printf("Send port %d to RUNNING_VERSION\n", dsu_socketfd->port);
+        dsu_write_port(dsu_program_state.sockfd, dsu_socketfd->port);
         
         /* Recieve file descriptor from old version */
-        int buf = 0;
-        read_fd(dsu_program_state.sockfd, &buf, 1, &dsu_socketfd->shadowfd);
-        if (buf >= 0)
+        int port = 0;
+        dsu_read_fd(dsu_program_state.sockfd, &dsu_socketfd->shadowfd, &port);
+        printf("buf: %d\n", port);
+        if (port >= 0) {
+            printf("Recieved socket %d from running program\n", dsu_socketfd->shadowfd);
             return 0; // On success zero is returned.
-         
+        }
     } 
-    
+    printf("Normal bind\n");
     /* Continue normal execution. */
     return bind(sockfd, addr, addrlen);
 }
@@ -297,9 +368,6 @@ int dsu_listen(int sockfd, int backlog) {
 
 int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
     
-    /* Sniff on DSU unix domain file descriptor for updates. */
-    FD_SET(dsu_program_state.sockfd, readfds);
-    
     /* Remove exchanged file descriptor. */
     struct dsu_sockets_struct *exchange_socket = dsu_program_state.exchange;
     while (exchange_socket->next != NULL) {
@@ -307,26 +375,33 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
         FD_CLR(exchange_socket->value.sockfd, readfds);
         exchange_socket = exchange_socket->next;
     }
+
+    /* Sniff on DSU unix domain file descriptor for updates. */
+    if (dsu_program_state.version == DSU_RUNNING_VERSION)
+        FD_SET(dsu_program_state.sockfd, readfds);
     
     int result = select(nfds, readfds, writefds, exceptfds, timeout);
     
     if (FD_ISSET(dsu_program_state.sockfd, readfds) && dsu_program_state.version == DSU_RUNNING_VERSION) {      
         /* New version of the application asks for file descriptor. */
-        
-        int port; int size = sizeof(dsu_program_state.sockfd_addr);
+        printf("Accept NEW_VERSION\n");
+        int port = -1; int size = sizeof(dsu_program_state.sockfd_addr);
         int internal_com = accept(dsu_program_state.sockfd, (struct sockaddr *) &dsu_program_state.sockfd_addr, (socklen_t *) &size);        
         if (internal_com < 0)
 		    exit(EXIT_FAILURE); // Set error in future.
-        recv(internal_com, &port, 1, 0);
+        dsu_read_port(internal_com, &port);
+        printf("Read port %d from NEW_VERSION\n", port);
         
         struct dsu_socket_struct *socket = dsu_sockets_search_port(dsu_program_state.binds, port);
         if (socket == NULL) {
             /* If port is not used in a bind, return error. Send internal fd as place
                holder. Fix this in the future!! */
             port = -1;
-            write_fd(internal_com, &port, 1, internal_com);
+            printf("Send error to NEW_VERSION\n");
+            dsu_write_fd(internal_com, internal_com, port);
         } else {
-            write_fd(internal_com, &port, 1, socket->shadowfd);
+            printf("Read socket %d to NEW_VERSION\n", socket->shadowfd);
+            dsu_write_fd(internal_com, socket->shadowfd, port);
         }
         
         /* Remove the DSU unix socket from the list. */
@@ -337,6 +412,8 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
 	return result;
 }
 #define select(nfds, readfds, writefds, exceptfds, timeout) dsu_select(nfds, readfds, writefds, exceptfds, timeout)
+
+/* To do - Overwrite accept() read() write() to use shadow data structure.
 
 
 /*********************************************************/
