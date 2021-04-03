@@ -1,3 +1,5 @@
+#include "../../openDSU.h"
+
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -8,13 +10,16 @@
 #include <netdb.h>
 #include <sys/un.h>
 
-#include "../openDSU.h"
 
 #define PORT    3000
 #define MAXMSG  512
 
+
 int main (int argc, char **argv) {
+    /* After crash the unix domain socket stays alive. 
+       to solve this for now I unlink in de first version. */
     unlink(DSU_COMM);
+    
     DSU_INIT;
     
 	/* Create the socket. */
@@ -24,7 +29,7 @@ int main (int argc, char **argv) {
 		perror ("Error creating socket");
 		exit (EXIT_FAILURE);
 	}
-	printf("1\n");
+
 	/* Bind socket. */
 	name.sin_family = AF_INET;
 	name.sin_port = htons(PORT);
@@ -33,14 +38,14 @@ int main (int argc, char **argv) {
 		perror("Error binding");
 		exit (EXIT_FAILURE);
 	}
-    printf("2\n");
+
 	/* Listen on socket. */
 	if (listen(sock, 1) < 0)
     {
       perror("Error start listening on socket");
       exit(EXIT_FAILURE);
     }
-	printf("3\n");
+
 	/* Initialize the set of active sockets. */
 	fd_set active_fd_set, read_fd_set;
 	struct sockaddr_in clientname;
