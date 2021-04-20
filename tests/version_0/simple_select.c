@@ -18,7 +18,7 @@
 int main (int argc, char **argv) {
     /* After crash the unix domain socket stays alive. 
        to solve this for now I unlink in de first version. */
-    unlink(DSU_COMM);
+    //unlink(DSU_COMM);
     
     DSU_INIT;
     
