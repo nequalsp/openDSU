@@ -27,7 +27,7 @@ struct dsu_sockets_struct {
     struct dsu_sockets_struct *next;
 };
 
-void dsu_sockets_add(struct dsu_sockets_struct **socket, struct dsu_socket_struct value) {        
+struct dsu_socket_struct *dsu_sockets_add(struct dsu_sockets_struct **socket, struct dsu_socket_struct value) {        
     
     struct dsu_sockets_struct *new_socket = (struct dsu_sockets_struct *) malloc(sizeof(struct dsu_sockets_struct));
     memcpy(&new_socket->value, &value, sizeof(struct dsu_socket_struct));
@@ -45,6 +45,8 @@ void dsu_sockets_add(struct dsu_sockets_struct **socket, struct dsu_socket_struc
     }
     
     (*socket)->next = new_socket;
+
+    return &new_socket->value;
 
 }
 
@@ -79,6 +81,13 @@ void dsu_sockets_remove_fd(struct dsu_sockets_struct **socket, int sockfd) {
         
 }
 
+struct dsu_socket_struct *dsu_sockets_transfer_fd(struct dsu_sockets_struct **dest, struct dsu_sockets_struct **src, struct dsu_socket_struct *dsu_socketfd) {   
+    struct dsu_socket_struct *new_dsu_socketfd = dsu_sockets_add(dest, *dsu_socketfd);
+    dsu_sockets_remove_fd(src, dsu_socketfd->value.sockfd);
+    return new_dsu_socketfd;
+}
+
+
 struct dsu_socket_struct *dsu_sockets_search_fd(struct dsu_sockets_struct *socket, int sockfd) {
     
     while (socket != NULL) {
@@ -101,6 +110,10 @@ struct dsu_socket_struct *dsu_sockets_search_port(struct dsu_sockets_struct *soc
 
 }
 
+
+
+
+   
 #define DSU_RUNNING_VERSION 0
 #define DSU_NEW_VERSION 1
 struct dsu_state_struct {
@@ -108,10 +121,13 @@ struct dsu_state_struct {
     int version;
     
     /* Binded ports of the application. */
+    struct dsu_sockets_struct *sockets;
 	struct dsu_sockets_struct *binds;
-    struct dsu_sockets_struct *exchange;
+    struct dsu_sockets_struct *exchanged;
+    struct dsu_sockets_struct *committed;
     
-    /* Internal communication. */    
+    /* Internal communication. */
+    int send_sockfd;    
     int sockfd;
     struct sockaddr_un sockfd_addr;
 
@@ -125,41 +141,68 @@ dsu_state dsu_program_state;
 /*********************************************************/
 
 /********************* Communication *********************/
+#define HAVE_MSGHDR_MSG_CONTROL 1   // Look this up. !!!!!
 
-#define HAVE_MSGHDR_MSG_CONTROL 1
-#define DSU_COMM "/tmp/dsu_comm.unix"
-#define DSU_COMM_LEN 18
-void dsu_open_communication(void) {
+#define DSU_MSG_SELECT_REQ 1
+#define DSU_MSG_SELECT_RES 2
+#define DSU_MSG_COMMIT_REQ 3
+#define DSU_MSG_COMMIT_RES 4
+#define DSU_MSG_EOL_REQ 5
+#define DSU_MSG_EOL_RES 6
+
+int dsu_write_message(int fd, int type, int port) {
     
-    /*  Create Unix domain socket for communication between the DSU applications.*/
-    dsu_program_state.sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
-    bzero(&dsu_program_state.sockfd_addr, sizeof(dsu_program_state.sockfd_addr));
-    dsu_program_state.sockfd_addr.sun_family = AF_UNIX;
-    strncpy(dsu_program_state.sockfd_addr.sun_path, DSU_COMM, DSU_COMM_LEN);
+    /* Concat two integers into one character. */
+    int data[2]; data[0] = type; data[2] = port;    
+    char *ptr = (char*) &data;
+    int nbytes = 2 * sizeof(int);
     
-    /*  Bind socket, if it fails and already exists we know that another DSU application is 
-        already running. These applications need to know each others listening ports. */
-    if ( bind(dsu_program_state.sockfd, (struct sockaddr *) &dsu_program_state.sockfd_addr, (socklen_t) sizeof(dsu_program_state.sockfd_addr)) != 0) {
-        if ( errno == EADDRINUSE ) {
-            /*  Other DSU application is running, ask for binded ports. */
-            dsu_program_state.version = DSU_NEW_VERSION;
-            return;
-        } else {
-            perror("bind");
-            exit(EXIT_FAILURE);
-        }
-    }
+	struct msghdr msg;
+	struct iovec iov[1];
+
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
     
-    /*  Continue normal execution. */
-    dsu_program_state.version = DSU_RUNNING_VERSION;
-    listen(dsu_program_state.sockfd, 1);
-    return;
+	iov[0].iov_base = ptr;
+	iov[0].iov_len = nbytes;
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+
+	return (sendmsg(fd, &msg, 0));
+}
+
+int dsu_read_message(int fd, int *type, int *port) {
+    
+    /* Concat two integers into one character. */
+    int data[2]; data[0] = 0; data[2] = 0;    
+    char *ptr = (char*) &data;
+    int nbytes = 2 * sizeof(int);
+
+	struct msghdr msg;
+	struct iovec iov[1];
+	int n;
+
+	msg.msg_name = NULL;
+	msg.msg_namelen = 0;
+
+	iov[0].iov_base = ptr;
+	iov[0].iov_len = nbytes;
+	msg.msg_iov = iov;
+	msg.msg_iovlen = 1;
+
+	if ( (n = recvmsg(fd, &msg, 0)) <= 0 )
+		return (n);
+    
+    *type = data[0];
+    *port = data[1];
+
+	return (n);
 }
 
 int dsu_write_fd(int fd, int sendfd, int port) {
     
     int32_t nport = htonl(port);
-    char *ptr = (char*)&nport;
+    char *ptr = (char*) &nport;
     int nbytes = sizeof(nport);
 
 	struct msghdr msg;
@@ -256,8 +299,43 @@ int dsu_read_fd(int fd, int *recvfd, int *port) {
 	return (n);
 }
 
+/* Abstract domain socket cannot be used in portable programs. But has the advantage that
+   it automatically disappear when all open references to the socket are closed. */
+#define DSU_COMM "\0dsu_comm.unix\0"
+#define DSU_COMM_LEN 15
+void dsu_open_communication(void) {
+    
+    /*  Create Unix domain socket for communication between the DSU applications.*/
+    dsu_program_state.sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    bzero(&dsu_program_state.sockfd_addr, sizeof(dsu_program_state.sockfd_addr));
+    dsu_program_state.sockfd_addr.sun_family = AF_UNIX;
+    strncpy(dsu_program_state.sockfd_addr.sun_path, DSU_COMM, DSU_COMM_LEN);
+    
+    /*  Bind socket, if it fails and already exists we know that another DSU application is 
+        already running. These applications need to know each others listening ports. */
+    if ( bind(dsu_program_state.sockfd, (struct sockaddr *) &dsu_program_state.sockfd_addr, (socklen_t) sizeof(dsu_program_state.sockfd_addr)) != 0) {
+        if ( errno == EADDRINUSE ) {
+            /*  Other DSU application is running, ask for binded ports. */
+            printf("New version\n");
+            dsu_program_state.version = DSU_NEW_VERSION;
+            return;
+        } else {
+            perror("bind");
+            exit(EXIT_FAILURE);
+        }
+    }
+    printf("First version\n");
+    /*  Continue normal execution. */
+    dsu_program_state.version = DSU_RUNNING_VERSION;
+    listen(dsu_program_state.sockfd, 1);
+    return;
+}
+
 int dsu_write_port(int fd, int port)
 {
+    int type = DSU_MSG_SELECT_REQ;
+    return dsu_write_message(fd, type, port);
+    /*
     int32_t nport = htonl(port);
     char *data = (char*)&nport;
     int bytes = sizeof(nport);
@@ -266,7 +344,6 @@ int dsu_write_port(int fd, int port)
         ret = write(fd, data, bytes);
         if (ret < 0) {
             if ((errno == EAGAIN) || (errno == EWOULDBLOCK)) {
-                // TO DO: Use select to retry.
             }
             else if (errno != EINTR) {
                 return -1;
@@ -279,10 +356,14 @@ int dsu_write_port(int fd, int port)
     }
     while (bytes > 0);
     return 0;
+    */
 }
 
 int dsu_read_port(int fd, int *port)
 {
+    int *type = DSU_MSG_SELECT_REQ;
+    return dsu_read_message(fd, *type, *port);
+    /*
     int32_t nport;
     char *data = (char*)&nport;
     int bytes = sizeof(nport);
@@ -306,6 +387,7 @@ int dsu_read_port(int fd, int *port)
 
     *port = ntohl(nport);
     return 0;
+    */
 }
 /*********************************************************/
 
@@ -328,8 +410,14 @@ void dsu_init() {
     dsu_program_state.version = DSU_RUNNING_VERSION;
     
     /*  Initialize the linked lists. */
+    dsu_program_state.sockets = NULL;
     dsu_program_state.binds = NULL;
-    dsu_program_state.exchange = NULL;
+    dsu_program_state.exchanged = NULL;
+    dsu_program_state.comitted = NULL;
+
+    /*  Initialize sockfd. */
+    dsu_program_state.sockfd = NULL;
+    dsu_program_state.send_sockfd = NULL;
     
     /*  Open communication between DSU programs. */
     dsu_open_communication();
@@ -349,7 +437,7 @@ int dsu_socket(int domain, int type, int protocol) {
         dsu_socket.port = 0;
         dsu_socket.sockfd = sockfd;
         dsu_socket.shadowfd = sockfd;
-        dsu_sockets_add(&dsu_program_state.binds, dsu_socket);
+        dsu_sockets_add(&dsu_program_state.sockets, dsu_socket);
     }
     
     return sockfd;
@@ -359,8 +447,8 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     /*  Bind is used to accept a client connection on an socket, this means it is a "public" socket 
         that is ready to accept requests. */
     
-    /* Find the metadata of sockfd. */
-    struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd); 
+    /* Find the metadata of sockfd, and transfer the socket to the state binds. */
+    struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd); 
     if (dsu_socketfd == NULL) {
         /*  The socket was not correctly captured in the socket() call. Therefore, we need to return
             error that socket is not correct. On error, -1 is returned, and errno is set to indicate 
@@ -368,6 +456,7 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         errno = EBADF;
         return -1;
     }
+    dsu_socketfd = dsu_sockets_transfer_fd(dsu_program_state.binds, dsu_program_state.sockets, dsu_socketfd);
     
     /*  To be able to map a socket to the correct socket in the new version the port must be known. 
         therefore we assume it is of the form sockaddr_in. This assumption must be solved and is still
@@ -377,8 +466,10 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 
     /*  If the program is the new version. Ask the file descriptor from the running version. */
     if (dsu_program_state.version == DSU_NEW_VERSION) {
+        
         /*  Connect to the running version. */
         connect(dsu_program_state.sockfd, &dsu_program_state.sockfd_addr, sizeof(dsu_program_state.sockfd_addr));
+        
         /*  Ask the running program for the file descriptor of corresponding port. */
         dsu_write_port(dsu_program_state.sockfd, dsu_socketfd->port);
         
@@ -389,6 +480,9 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
             /*  On success zero is returned. */
             return 0;
         }
+        
+        /*  Disconnect from the running program. */
+        close(dsu_program_state.sockfd);
     }
 
     /*  Running program does not have the file descriptor, then proceed with normal execution. */
@@ -418,7 +512,7 @@ int dsu_listen(int sockfd, int backlog) {
         return listen(sockfd, sockfd);
     
     /*  The socket is recieved from the old version and listen() does not need to be called. */
-    return 0;
+    return 0;dsu_program_state.sockfd
 }
 
 int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
@@ -427,7 +521,7 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
         file descriptors to their shadow file descriptors.   
 
     /*  Remove exchanged file descriptor. */
-    struct dsu_sockets_struct *exchange_socket = dsu_program_state.exchange;
+    struct dsu_sockets_struct *exchange_socket = dsu_program_state.committed;
     while (exchange_socket != NULL) {
         FD_CLR(exchange_socket->value.sockfd, readfds);
         exchange_socket = exchange_socket->next;
@@ -456,11 +550,12 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
     
     /*  Handle message of the new version. */
     if (FD_ISSET(dsu_program_state.sockfd, readfds) && dsu_program_state.version == DSU_RUNNING_VERSION) {
+        
         /*  Accept the connection request of the new version. */
         int port = -1; int size = sizeof(dsu_program_state.sockfd_addr);
         int internal_com = accept(dsu_program_state.sockfd, (struct sockaddr *) &dsu_program_state.sockfd_addr, (socklen_t *) &size);        
         if (internal_com < 0)
-		    exit(EXIT_FAILURE); // Set error in future.
+		    exit(EXIT_FAILURE); // Set error in future. TO DO!!
         /*  Read port request from the new version. */
         dsu_read_port(internal_com, &port);
         
@@ -474,11 +569,12 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
             /*  Transfer the file descriptor to the new version. */
             dsu_write_fd(internal_com, dsu_sockfd->shadowfd, port);
             /*  Update DSU program state. */
-            dsu_sockets_add(&dsu_program_state.exchange, *dsu_sockfd);
+            dsu_sockets_add(&dsu_program_state.exchanged, *dsu_sockfd);
             dsu_sockets_remove_fd(&dsu_program_state.binds, dsu_sockfd->sockfd);
         }
         
         /* Remove the DSU unix socket from the list. */
+        close(internal_com);
         FD_CLR(dsu_program_state.sockfd, readfds);
         return result-1;
     }
