@@ -6,6 +6,7 @@ CC?=gcc
 LIB=
 INC=
 ARCH=
+DEBUG= -D DEBUG
 
 # File location
 SRC0:=./tests/version_0
@@ -20,10 +21,10 @@ OBJS1:=$(patsubst $(SRC1)/%.c,$(OBJ1)/%.o,$(SRCS1))
 all: $(OBJS0) $(OBJS1)
 
 $(OBJ0)/%.o: $(OBJ0)/%.c
-	$(CC) $(CFLAGS) $< -o $@ $(LIB)
+	$(CC) $(CFLAGS) $< -o $@ $(LIB) $(DEBUG)
 
 $(OBJ1)/%.o: $(OBJ1)/%.c
-	$(CC) $(CFLAGS) $< -o $@ $(LIB)
+	$(CC) $(CFLAGS) $< -o $@ $(LIB) $(DEBUG)
 
 clean:
 	rm -f $(OBJS0)
