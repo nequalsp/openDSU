@@ -1,31 +1,48 @@
 # Compilation settings
-CFLAGS	+= -Wall
+CFLAGS	+= -Wall -Werror
 CFLAGS	+= -O3
 CFLAGS	+= -g2
 CC?=gcc
-LIB=
-INC=
-ARCH=
-DEBUG= -D DEBUG
 
-# File location
-SRC0:=./tests/version_0
-OBJ0:=./tests/version_0
-SRC1:=./tests/version_1
-OBJ1:=./tests/version_1
-SRCS0:=$(wildcard $(SRC0)/*.c)
-OBJS0:=$(patsubst $(SRC0)/%.c,$(OBJ0)/%.o,$(SRCS0))
-SRCS1:=$(wildcard $(SRC1)/*.c)
-OBJS1:=$(patsubst $(SRC1)/%.c,$(OBJ1)/%.o,$(SRCS1))
+DEBUG= -D DEBUG	
+LIB=/usr/local/lib/openDSU
+INCLUDE=/usr/local/include/openDSU
 
-all: $(OBJS0) $(OBJS1)
+# File location of test scripts.
+SRC:=tests/version_0
+OBJ:=tests/version_0
+INC:=tests/version_0/includes
+SRCS:=$(wildcard $(SRC)/*.c)
+OBJS:=$(patsubst $(SRC)/%.c,$(SRC)/%.o,$(SRCS))
+INCS:=$(wildcard $(INC)/*.c)
+INCS_OBJ:=$(patsubst $(INC)/%.c,$(INC)/%.o,$(INCS))
 
-$(OBJ0)/%.o: $(OBJ0)/%.c
-	$(CC) $(CFLAGS) $< -o $@ $(LIB) $(DEBUG)
 
-$(OBJ1)/%.o: $(OBJ1)/%.c
-	$(CC) $(CFLAGS) $< -o $@ $(LIB) $(DEBUG)
+all: build install test
+
+
+# Compile shared library.	
+build: libopenDSU.so
+
+openDSU.o: openDSU.c
+	$(CC) -c $(CFLAGS) -fpic $< -o $@ $(DEBUG)
+
+libopenDSU.so: openDSU.o
+	$(CC) -shared $< -o $@ $(DEBUG)
+
+
+install: build
+	$(MAKE) -C ./install install
+
+uninstall:
+	$(MAKE) -C ./install uninstall
+
+
+test:
+	$(MAKE) -C ./tests test
 
 clean:
-	rm -f $(OBJS0)
-	rm -f $(OBJS1)
+	rm -f libopenDSU.so
+	rm -f openDSU.o
+	$(MAKE) -C ./tests clean
+

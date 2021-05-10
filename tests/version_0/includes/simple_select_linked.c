@@ -15,37 +15,8 @@
 #define MAXMSG  512
 
 
-int main (int argc, char **argv) {
-    /* After crash the unix domain socket stays alive. 
-       to solve this for now I unlink in de first version. */
-    //unlink(DSU_COMM);
-    
-    DSU_INIT;
-    
-	/* Create the socket. */
-	struct sockaddr_in name;
-	int sock = socket(PF_INET, SOCK_STREAM, 0);
-	if (sock < 0) {
-		perror ("Error creating socket");
-		exit (EXIT_FAILURE);
-	}
-
-	/* Bind socket. */
-	name.sin_family = AF_INET;
-	name.sin_port = htons(PORT);
-	name.sin_addr.s_addr = htonl(INADDR_ANY);
-	if (bind(sock, (struct sockaddr *) &name, sizeof(name)) < 0) {
-		perror("Error binding");
-		exit (EXIT_FAILURE);
-	}
-
-	/* Listen on socket. */
-	if (listen(sock, 1) < 0)
-    {
-      perror("Error start listening on socket");
-      exit(EXIT_FAILURE);
-    }
-
+int start(int sock) {
+	
 	/* Initialize the set of active sockets. */
 	fd_set active_fd_set, read_fd_set;
 	struct sockaddr_in clientname;
