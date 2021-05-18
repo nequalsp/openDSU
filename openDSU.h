@@ -1,7 +1,8 @@
 #ifndef openDSU
 #define openDSU
 
-
+#include <stdio.h>
+#include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -20,7 +21,8 @@ struct dsu_sockets_struct {
 struct dsu_state_struct {
     /* State of application. */
     int version;
-    
+	FILE *logfd;    
+
     /* Binded ports of the application. */
     struct dsu_sockets_struct *sockets;
 	struct dsu_sockets_struct *binds;
