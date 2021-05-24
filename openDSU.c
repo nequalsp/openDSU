@@ -9,6 +9,7 @@
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <signal.h>
 
 #include "openDSU.h"
 
@@ -18,15 +19,22 @@
 #else
 #define DSU_DEBUG 0
 #endif
-#define DSU_DEBUG_PRINT(format, ...) if (DSU_DEBUG) { printf(format, ## __VA_ARGS__); fprintf(dsu_program_state.logfd, format, ## __VA_ARGS__); fflush(dsu_program_state.logfd);}
 
+#if DSU_DEBUG == 1
+#define DSU_DEBUG_PRINT(format, ...) {printf(format, ## __VA_ARGS__); fprintf(dsu_program_state.logfd, format, ## __VA_ARGS__); fflush(dsu_program_state.logfd);}
+#else
+#define DSU_DEBUG_PRINT(format, ...)
+#endif
 
 #undef socket
 #undef bind
 #undef listen
-#undef select
 #undef accept
+#undef accept4
+#undef close
 
+#undef select
+#undef epoll
 
 struct dsu_state_struct dsu_program_state;
 
@@ -294,8 +302,8 @@ int dsu_read_fd(int fd, int *recvfd, int *port) {
 
 /* Abstract domain socket cannot be used in portable programs. But has the advantage that
    it automatically disappear when all open references to the socket are closed. */
-#define DSU_COMM "\0dsu_comm.unix\0"
-#define DSU_COMM_LEN 15
+#define DSU_COMM "\0dsu_comm.unix"
+#define DSU_COMM_LEN 14
 void dsu_open_communication(void) {
     
     /*  Create Unix domain socket for communication between the DSU applications. */
@@ -357,7 +365,7 @@ void dsu_commit_socket(struct dsu_socket_struct *exchange_socket) {
 
 void dsu_clr_fd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     /*  Remove socket for the fd_set. */
-    
+    DSU_DEBUG_PRINT(" - %d X (%ld-%ld)\n", dsu_sockfd->sockfd, (long) getpid(), (long) gettid());
     FD_CLR(dsu_sockfd->sockfd, readfds);
 }
 
@@ -365,15 +373,18 @@ void dsu_set_shadowfd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     /*  Change socket file descripter to its shadow file descriptor. */   
    
      if (FD_ISSET(dsu_sockfd->sockfd, readfds)) {
+		DSU_DEBUG_PRINT(" - Set %d => %d (%ld-%ld)\n", dsu_sockfd->sockfd, dsu_sockfd->shadowfd, (long) getpid(), (long) gettid());
         FD_CLR(dsu_sockfd->sockfd, readfds);
         FD_SET(dsu_sockfd->shadowfd, readfds);
     }
+	
 }
 
 void dsu_set_originalfd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     /*  Change shadow file descripter to its original file descriptor. */
     
      if (FD_ISSET(dsu_sockfd->shadowfd, readfds)) {
+		DSU_DEBUG_PRINT(" - Reset %d => %d (%ld-%ld)\n", dsu_sockfd->shadowfd, dsu_sockfd->sockfd, (long) getpid(), (long) gettid());
         FD_CLR(dsu_sockfd->shadowfd, readfds);
         FD_SET(dsu_sockfd->sockfd, readfds);
      }
@@ -390,12 +401,22 @@ int dsu_shadowfd(int sockfd) {
     return sockfd;
 }
 
-#define DSU_LOG "/var/log/dsu.log"
+#define DSU_LOG "/var/log/dsu"
+#define DSU_LOG_LEN 12
 void dsu_init() {
     
-    /*  Set default program state. */
+	/*  Set default program state. */
     dsu_program_state.version = DSU_RUNNING_VERSION;
-	dsu_program_state.logfd = fopen(DSU_LOG, "w");
+	
+	/* 	Debugging */
+	#if DSU_DEBUG == 1
+	char logfile[DSU_LOG_LEN+1+11+4+1];	
+	sprintf(logfile, "%s-%ld.log", DSU_LOG, (long) getpid());
+	dsu_program_state.logfd = fopen(logfile, "w");
+	if (dsu_program_state.logfd == NULL)
+		perror("DSU \" Error opening debugging file\":");
+	#endif
+	DSU_DEBUG_PRINT("INIT() (%ld-%ld)\n", (long) getpid(), (long) gettid());
     
     /*  Initialize the linked lists. */
     dsu_program_state.sockets = NULL;
@@ -409,13 +430,17 @@ void dsu_init() {
     dsu_program_state.connected = 0;
     
     /*  Open communication between DSU programs. */
+	
     dsu_open_communication();
-    
+	DSU_DEBUG_PRINT(" - Communcation fd: %d (%ld-%ld)\n", dsu_program_state.sockfd, (long) getpid(), (long) gettid());    
+
     return;
 }
 
+
+
 int dsu_socket(int domain, int type, int protocol) {
-    DSU_DEBUG_PRINT("Socket() (%ld)\n", (long) getpid());
+    DSU_DEBUG_PRINT("Socket() (%ld-%ld)\n", (long) getpid(), (long) gettid());
     /*  With socket() an endpoint for communication is created and returns a file descriptor that refers to that 
         endpoint. The DSU library will connect the file descriptor to a shadow file descriptor. The shadow file 
         descriptor may be recieved from running version. */
@@ -470,7 +495,7 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         dsu_read_fd(dsu_program_state.sockfd, &dsu_socketfd->shadowfd, &port);
         if (port >= 0) {
             /*  On success zero is returned. */
-			DSU_DEBUG_PRINT(" - Recieved fd: %d (%ld-%ld)\n", dsu_socketfd->shadowfd, (long) getpid(), (long) gettid());
+			DSU_DEBUG_PRINT("  - Recieved fd: %d (%ld-%ld)\n", dsu_socketfd->shadowfd, (long) getpid(), (long) gettid());
             dsu_sockets_transfer_fd(&dsu_program_state.exchanged, &dsu_program_state.sockets, dsu_socketfd);
             return 0;
         }
@@ -487,7 +512,7 @@ int dsu_listen(int sockfd, int backlog) {
     /*  listen() marks the socket referred to by sockfd as a passive socket, that is, as a socket that will be
         used to accept incoming connection requests using accept(). */
     
-    /*  If it is the running version, run normal listen() function. */
+	/*  If it is the running version, run normal listen() function. */
     if (dsu_program_state.version == DSU_RUNNING_VERSION) {
         return listen(sockfd, sockfd);
 	}
@@ -507,8 +532,58 @@ int dsu_listen(int sockfd, int backlog) {
         return listen(sockfd, sockfd);
     
     /*  The socket is recieved from the old version and listen() does not need to be called. */
+	DSU_DEBUG_PRINT(" - Shadow fd: %d (%ld-%ld)\n", dsu_socketfd->shadowfd, (long) getpid(), (long) gettid());
     return 0;
 }
+
+int dsu_accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
+	DSU_DEBUG_PRINT("Accept() (%ld-%ld)\n", (long) getpid(), (long) gettid());
+    /*  The accept() system call is used with connection-based socket types (SOCK_STREAM, SOCK_SEQPACKET).  It extracts the first
+        connection request on the queue of pending connections for the listening socket, sockfd, creates a new connected socket, and
+        returns a new file descriptor referring to that socket. The DSU library need to convert the file descriptor to the shadow
+        file descriptor. */     
+    
+    int shadowfd = dsu_shadowfd(sockfd);
+    return accept(shadowfd, addr, addrlen);    
+}
+
+int dsu_accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags) {
+	DSU_DEBUG_PRINT("Accept4() (%ld-%ld)\n", (long) getpid(), (long) gettid());
+    /*  For more information see accept(). */     
+    int shadowfd = dsu_shadowfd(sockfd);
+    return accept4(shadowfd, addr, addrlen, flags);    
+}
+
+int dsu_close(int sockfd) {
+	DSU_DEBUG_PRINT("Close() (%ld-%ld)\n", (long) getpid(), (long) gettid());
+	
+	struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd);
+    if (dsu_socketfd != NULL) {
+		dsu_sockets_remove_fd(&dsu_program_state.sockets, sockfd);
+		return close(sockfd);
+	} 
+	
+	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
+	if (dsu_socketfd != NULL) {
+		dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
+		return close(sockfd);
+	}
+	
+	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.exchanged, sockfd);
+	if (dsu_socketfd != NULL) {
+		dsu_sockets_remove_fd(&dsu_program_state.exchanged, sockfd);
+		return close(sockfd);
+	}
+	
+	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.committed, sockfd);
+	if (dsu_socketfd != NULL)
+		dsu_sockets_remove_fd(&dsu_program_state.committed, sockfd);
+	
+	return close(sockfd);
+
+}
+
+
 
 int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
 	DSU_DEBUG_PRINT("Select() (%ld-%ld)\n", (long) getpid(), (long) gettid());
@@ -523,14 +598,14 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
     }
     
     /*  Remove committed (successfully transfered) file descriptors. The new version, can only use exchanged file descriptors 
-        after they are committed.*/
+        after they are committed. */
     dsu_forall_sockets(dsu_program_state.committed, dsu_clr_fd, readfds);
     if (dsu_program_state.version == DSU_NEW_VERSION) {    
         dsu_forall_sockets(dsu_program_state.exchanged, dsu_clr_fd, readfds);
     }
     
     /*  Convert to shadow file descriptors, this must be done for binded sockets. The running version must still handle sockets
-        that are in transfer.So, sockets that are exchanged but not committed, must be mapped to the shadow file.*/
+        that are in transfer. So, sockets that are exchanged but not committed, must be mapped to the shadow file. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_set_shadowfd, readfds);    
     if (dsu_program_state.version == DSU_RUNNING_VERSION) {
         dsu_forall_sockets(dsu_program_state.exchanged, dsu_set_shadowfd, readfds);
@@ -552,7 +627,8 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
         shutdown(dsu_program_state.sub_sockfd, SHUT_RDWR);
         close(dsu_program_state.sub_sockfd);
         DSU_DEBUG_PRINT("[Terminate] (%ld-%ld)\n", (long) getpid(), (long) gettid());
-        exit(EXIT_SUCCESS);
+		killpg(getpgid(getpid()), SIGTERM);	
+		//exit(EXIT_SUCCESS);
     }
     
     /*  Sniff on DSU unix domain file descriptor for messages of new versions. */
@@ -560,9 +636,19 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
     if (dsu_program_state.sub_sockfd != 0 && dsu_program_state.version == DSU_RUNNING_VERSION) {
         FD_SET(dsu_program_state.sub_sockfd, readfds);
     }
-
+	
+	for(int i = 0; i < FD_SETSIZE; i++)
+		if ( FD_ISSET(i, readfds) ) {
+			DSU_DEBUG_PRINT(" - Listening: %d (%ld-%ld)\n", i, (long) getpid(), (long) gettid());
+		}
+	
     int result = select(nfds, readfds, writefds, exceptfds, timeout);
     if (result < 0) return result;
+
+	for(int i = 0; i < FD_SETSIZE; i++)
+		if ( FD_ISSET(i, readfds) ) {
+			DSU_DEBUG_PRINT(" - Incomming: %d (%ld-%ld)\n", i, (long) getpid(), (long) gettid());
+		}
 
     /*  Handle message of the new version. */
     if (dsu_program_state.version == DSU_RUNNING_VERSION) {
@@ -647,7 +733,6 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
             /*  TO DO, make persistant. */
         }
 
-
     }
     
     /* Convert shadow file descriptors back to user level file descriptors to avoid changing the external behaviour. */
@@ -660,16 +745,6 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
     FD_CLR(dsu_program_state.sub_sockfd, readfds);
     
 	return result;
-}
-
-int dsu_accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
-    /*  The accept() system call is used with connection-based socket types (SOCK_STREAM, SOCK_SEQPACKET).  It extracts the first
-        connection request on the queue of pending connections for the listening socket, sockfd, creates a new connected socket, and
-        returns a new file descriptor referring to that socket. The DSU library need to convert the file descriptor to the shadow
-        file descriptor. */     
-    
-    int shadowfd = dsu_shadowfd(sockfd);
-    return accept(shadowfd, addr, addrlen);    
 }
 
 int dsu_epoll_create(int size) {

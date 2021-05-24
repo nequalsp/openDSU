@@ -41,19 +41,27 @@ struct dsu_state_struct {
 extern struct dsu_state_struct dsu_program_state;
 
 void dsu_init();
+
 int dsu_socket(int domain, int type, int protocol);
 int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
 int dsu_listen(int sockfd, int backlog);
-int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
 int dsu_accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen);
+int dsu_accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags);
+int dsu_close(int sockfd);
+
+int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
 int dsu_epoll_create(int size);
 
 #define DSU_INIT dsu_init()
+
 #define socket(domain, type, protocol) dsu_socket(domain, type, protocol)
 #define bind(sockfd, addr, addrlen) dsu_bind(sockfd, addr, addrlen)
 #define listen(sockfd, backlog) dsu_listen(sockfd, backlog)
-#define select(nfds, readfds, writefds, exceptfds, timeout) dsu_select(nfds, readfds, writefds, exceptfds, timeout)
+#define close(sockfd) dsu_close(sockfd)
+#define accept4(sockfd, addr, addrlen, flags) dsu_accept4(sockfd, addr, addrlen, flags)
 #define accept(sockfd, addr, addrlen) dsu_accept(sockfd, addr, addrlen)
+
+#define select(nfds, readfds, writefds, exceptfds, timeout) dsu_select(nfds, readfds, writefds, exceptfds, timeout)
 #define epoll_create(size) dsu_epoll_create(size)
 
 /*********************************************************/
