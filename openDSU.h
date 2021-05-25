@@ -6,6 +6,35 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+
+#ifdef DEBUG
+#define DSU_DEBUG 1
+#else
+#define DSU_DEBUG 0
+#endif
+
+
+#define DSU_RUNNING_VERSION 0
+#define DSU_NEW_VERSION 1
+
+
+#define HAVE_MSGHDR_MSG_CONTROL 1   // Look this up. !!!!!
+
+
+#define DSU_MSG_SELECT_REQ 1
+#define DSU_MSG_SELECT_RES 2
+#define DSU_MSG_COMMIT_REQ 3
+#define DSU_MSG_COMMIT_RES 4
+#define DSU_MSG_EOL_REQ 5
+#define DSU_MSG_EOL_RES 6
+
+
+#define DSU_COMM "\0dsu_comm.unix"
+#define DSU_COMM_LEN 14
+#define DSU_LOG "/var/log/dsu"
+#define DSU_LOG_LEN 12
+
+
 /*  Ordered linked list for sockets that are bind to port the application.  */
 struct dsu_socket_struct {
     int sockfd;
@@ -21,13 +50,16 @@ struct dsu_sockets_struct {
 struct dsu_state_struct {
     /* State of application. */
     int version;
-	FILE *logfd;    
+	#if DSU_DEBUG == 1
+	FILE *logfd;
+	#endif  
 
     /* Binded ports of the application. */
     struct dsu_sockets_struct *sockets;
 	struct dsu_sockets_struct *binds;
     struct dsu_sockets_struct *exchanged;
     struct dsu_sockets_struct *committed;
+	struct dsu_sockets_struct *accepted;
     
     /* Internal communication. */
     int connected;
