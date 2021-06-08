@@ -51,7 +51,9 @@ int main (int argc, char **argv) {
 	struct sockaddr_in clientname;
   	FD_ZERO(&active_fd_set);
   	FD_SET(sock, &active_fd_set);
-
+    
+    fork();
+    
 	printf("Start listening on port %d...\n", PORT);
 	while (1)
 	{
@@ -66,15 +68,15 @@ int main (int argc, char **argv) {
 		for (int i = 0; i < FD_SETSIZE; ++i) {
 			if (FD_ISSET(i, &read_fd_set)) {
 				if (i == sock) {
+
 					/* Accept new connection request. */
 					size_t size = sizeof(clientname);
-					int new = accept(sock, (struct sockaddr *) &clientname, (socklen_t *) &size);
-					if (new < 0) {
-						perror("Error accepting message");
-						exit(EXIT_FAILURE);
-					}
-	            	FD_SET(new, &active_fd_set);
+					int new = accept4(sock, (struct sockaddr *) &clientname, (socklen_t *) &size, SOCK_NONBLOCK);
+					if (new > 0)
+						FD_SET(new, &active_fd_set);
+
 				} else {
+
 					/* Read message. */
 					char buffer[MAXMSG];
   					int nbytes;
@@ -98,7 +100,8 @@ int main (int argc, char **argv) {
 					
 					/* Close connection. */
 					close(i);
-	                FD_CLR(i, &active_fd_set);				
+	                FD_CLR(i, &active_fd_set);
+				
 	          	}
 	      	}
 		}

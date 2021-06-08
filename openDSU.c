@@ -10,6 +10,12 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <signal.h>
+#include <fcntl.h>          
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <sys/file.h>
 
 #include "openDSU.h"
 
@@ -19,6 +25,7 @@
 #define DSU_DEBUG_PRINT(format, ...)
 #endif
 
+
 #undef socket
 #undef bind
 #undef listen
@@ -27,8 +34,9 @@
 #undef close
 
 #undef select
-#undef epoll
 
+
+/* Global state variable */
 struct dsu_state_struct dsu_program_state;
 
 struct dsu_socket_struct *dsu_sockets_add(struct dsu_sockets_struct **socket, struct dsu_socket_struct value) {  
@@ -111,6 +119,63 @@ struct dsu_socket_struct *dsu_sockets_search_port(struct dsu_sockets_struct *soc
 
 }
 
+int dsu_socket_add_comfd(struct dsu_socket_struct *socket, int comfd) {
+       
+    struct dsu_comfd_struct **comfds = &socket->comfds;
+
+    struct dsu_comfd_struct *new_comfd = (struct dsu_comfd_struct *) malloc(sizeof(struct dsu_comfd_struct));
+    memcpy(&new_comfd->value, &comfd, sizeof(int));
+    new_comfd->next = NULL;     // Append at the end of the list.
+    
+    /*  First node of the list. */
+    if (*comfds == NULL) {
+        *comfds = new_comfd;
+        return new_comfd->value;
+    }        
+
+    /*  Add to the last node of non-empty list. */
+    while ((*comfds)->next != NULL) {
+        *comfds = (*comfds)->next;
+    }
+    (*comfds)->next = new_comfd;
+	
+    return new_comfd->value;
+
+}
+
+void dsu_socket_remove_comfd(struct dsu_socket_struct *socket, int comfd) {
+    
+    struct dsu_comfd_struct **comfds = &socket->comfds;
+
+    /*  Empty comfds. */
+    if (*comfds == NULL) return;
+    
+    /*  List of size 1. */
+    if ((*comfds)->next == NULL) {
+        if ((*comfds)->value == comfd) {
+            free(*comfds);
+            *comfds = NULL;
+            return;
+        } else
+            return;
+    };    
+    
+    /*  List of size > 1. */
+    struct dsu_comfd_struct *prev_comfds = *comfds;
+    struct dsu_comfd_struct *cur_comfds = (*comfds)->next;
+    
+    while (cur_comfds != NULL) {
+        if (cur_comfds->value == comfd) {
+            prev_comfds->next = cur_comfds->next;
+            free(cur_comfds);
+            return;
+        }
+        prev_comfds = cur_comfds;
+        cur_comfds = cur_comfds->next;
+    }
+
+}
+
 #define dsu_forall_sockets(x, y, ...) { struct dsu_sockets_struct *dsu_socket_loop = x;\
                                         while (dsu_socket_loop != NULL) {\
                                             (*y)(&dsu_socket_loop->value, ## __VA_ARGS__);\
@@ -121,56 +186,6 @@ struct dsu_socket_struct *dsu_sockets_search_port(struct dsu_sockets_struct *soc
 
 /* Global state variable */
 extern struct dsu_state_struct dsu_program_state;
-
-
-int dsu_write_message(int fd, int type, int port) {
-    
-    /* Concat two integers into one character. */
-    int data[2]; data[0] = type; data[1] = port;    
-    char *ptr = (char*) &data;
-    int nbytes = 2 * sizeof(int);
-    
-    struct iovec iov[1];
-	iov[0].iov_base = ptr;
-	iov[0].iov_len = nbytes;
-
-    struct msghdr msg;
-    memset(&msg, 0, sizeof(msg));
-    msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-
-	return (sendmsg(fd, &msg, 0));
-}
-
-int dsu_read_message(int fd, int *type, int *port) {
-    
-    /* Concat two integers into one character. */
-    int data[2]; data[0] = 0; data[1] = 0;    
-    char *ptr = (char*) &data;
-    int nbytes = 2 * sizeof(int);
-    
-    struct iovec iov[1];
-	iov[0].iov_base = ptr;
-	iov[0].iov_len = nbytes;
-    
-    struct msghdr msg;
-    memset(&msg, 0, sizeof(msg));
-    msg.msg_name = NULL;
-	msg.msg_namelen = 0;
-	msg.msg_iov = iov;
-	msg.msg_iovlen = 1;
-
-    int n;
-	if ( (n = recvmsg(fd, &msg, 0)) <= 0 )
-		return (n);
-    
-    *type = data[0];
-    *port = data[1];
-
-	return (n);
-}
 
 int dsu_write_fd(int fd, int sendfd, int port) {
     
@@ -279,78 +294,186 @@ int dsu_read_fd(int fd, int *recvfd, int *port) {
 	return (n);
 }
 
-/* Abstract domain socket cannot be used in portable programs. But has the advantage that
-   it automatically disappear when all open references to the socket are closed. */
 
-void dsu_open_communication(void) {
+
+void dsu_sniff_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
+    /*  Listen under the hood to accepted connections on public socket. A new generation can request
+        file descriptors. */
     
-    /*  Create Unix domain socket for communication between the DSU applications. */
-    dsu_program_state.sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
-    bzero(&dsu_program_state.sockfd_addr, sizeof(dsu_program_state.sockfd_addr));
-    dsu_program_state.sockfd_addr.sun_family = AF_UNIX;
-    strncpy(dsu_program_state.sockfd_addr.sun_path, DSU_COMM, DSU_COMM_LEN);
+    if (dsu_sockfd->comfd != 0) {
+        //if (dsu_sockfd->status[DSU_STATUS] != 1 || flock(dsu_sockfd->comfd, LOCK_EX | LOCK_NB) == 0) {
+             FD_SET(dsu_sockfd->comfd, readfds);
+        //}
+    }
+
+
+    struct dsu_comfd_struct *comfds = dsu_sockfd->comfds;   
     
-    /*  Bind socket, if it fails and already exists we know that another DSU application is 
-        already running. These applications need to know each others listening ports. */
-    if ( bind(dsu_program_state.sockfd, (struct sockaddr *) &dsu_program_state.sockfd_addr, (socklen_t) sizeof(dsu_program_state.sockfd_addr)) != 0) {
-        if ( errno == EADDRINUSE ) {
-            /*  An older version of the program is running, connect to this application over
-                Unix domain socket. */
-            DSU_DEBUG_PRINT("[New version] (%ld-%ld)\n", (long) getpid(), (long) gettid());
-            dsu_program_state.version = DSU_NEW_VERSION;
+    while (comfds != NULL) {
+        FD_SET(comfds->value, readfds);
+        comfds = comfds->next;        
+    }
+
+}
+
+
+void dsu_acc_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
+    /*  Accept connection requests of new generation. Race conditions could occur because multiple
+        processes or threads are listening on the same socket. */    
+
+    if (dsu_sockfd->comfd == 0) return;
+    
+    
+    if (FD_ISSET(dsu_sockfd->comfd, readfds)) {
+                       
+            int size = sizeof(dsu_sockfd->comfd_addr);
+            int acc = accept4(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size, SOCK_NONBLOCK);
             
-            DSU_DEBUG_PRINT(" - Connect to running version request (%ld-%ld)\n", (long) getpid(), (long) gettid());
-            if ( connect(dsu_program_state.sockfd, (struct sockaddr *) &dsu_program_state.sockfd_addr, sizeof(dsu_program_state.sockfd_addr)) < 0) {
-                perror("DSU \"Error connecting to Unix domain socket\":");
+            
+            /*  Other process already accepted the message. */
+            if (acc == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                return;            
+            
+            if ( acc != -1) {
+                DSU_DEBUG_PRINT(" - Accept %d on %d (%ld-%ld)\n", acc, dsu_sockfd->comfd, (long) getpid(), (long) gettid());
+                dsu_socket_add_comfd(dsu_sockfd, acc);
             }
-            return;
-        } else {
-            perror("DSU \"Error binding to Unix domain socket\":");
-            exit(EXIT_FAILURE);
+        
+            
+            FD_CLR(dsu_sockfd->comfd, readfds);
+    }
+
+    
+}
+
+
+void dsu_handle_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
+    /*  Race conditions could happend when a "late" fork is performed. The fork happend after 
+        accepting dsu communication connection. */
+ 
+    struct dsu_comfd_struct *comfds =   dsu_sockfd->comfds;   
+    
+    while (comfds != NULL) {
+    
+        if (FD_ISSET(comfds->value, readfds)) {
+            
+            
+            int buffer = 0;
+            int port = dsu_sockfd->port;
+            
+            
+            /*  Race condition on recv, hence do not wait, and continue on error. */
+            int r = recv(comfds->value, &buffer, sizeof(buffer), MSG_DONTWAIT);
+            
+            
+            /*  Connection is closed by client. */
+            if (r == 0) {
+                
+                DSU_DEBUG_PRINT(" - Close on %d (%ld-%ld)\n", comfds->value, (long) getpid(), (long) gettid());
+                                 
+                close(comfds->value);
+                dsu_socket_remove_comfd(dsu_sockfd, comfds->value);
+                FD_CLR(comfds->value, readfds);
+                
+                continue;
+            } 
+            
+            
+            /*  Other process already read message. */
+            else if (r == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+                continue;
+
+            
+            /*  Unkown error. */
+            else if (r == -1)
+                port = 1;
+            
+            DSU_DEBUG_PRINT(" - Message on %d (%ld-%ld)\n", comfds->value, (long) getpid(), (long) gettid());
+            
+            /*  Respond to request. */
+            dsu_write_fd(comfds->value, dsu_sockfd->shadowfd, port);
+            FD_CLR(comfds->value, readfds);
         }
+
+        comfds = comfds->next;        
+    }
+
+}
+        
+
+void dsu_settle_fd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
+    
+        
+    /*  Public socket is monitored by next generation. Old generation can close the connection
+        of the unix domain socket. */
+    if (dsu_sockfd->comfd != 0
+        && dsu_sockfd->status[DSU_COUNTER] == dsu_sockfd->internal[DSU_COUNTER] 
+        && dsu_sockfd->status[DSU_STATUS] > 0
+    ) {
+         
+            close(dsu_sockfd->comfd);
+            
+            dsu_sockfd->comfd = 0;                  // Retire socket.
+            dsu_sockfd->status[DSU_STATUS] = 2;
+            --dsu_program_state.binded;
+   
     }
     
-    DSU_DEBUG_PRINT("[First version] (%ld-%ld)\n", (long) getpid(),(long) gettid());
-    /*  Continue normal execution. */
-    dsu_program_state.version = DSU_RUNNING_VERSION;
-    listen(dsu_program_state.sockfd, 1);
-    return;
-}
-
-
-void dsu_commit_socket(struct dsu_socket_struct *exchange_socket) {
-    /*  After successfully recieving the socket file descriptor, send to the running version that the program is 
-        ready to start listening on the socket. */
+    /*  Retired public socket is removed from monitoring. */
+    if (dsu_sockfd->comfd == 0) {
     
-    DSU_DEBUG_PRINT(" - Write commit port request (%ld-%ld)\n", (long) getpid(), (long) gettid());
-    if (dsu_write_message(dsu_program_state.sockfd, DSU_MSG_COMMIT_REQ, exchange_socket->port) < 0) {
-        perror("DSU \"Write commit response failed\": ");
-        exit(EXIT_FAILURE);
+        DSU_DEBUG_PRINT(" - %d X (%ld-%ld)\n", dsu_sockfd->sockfd, (long) getpid(), (long) gettid());
+        FD_CLR(dsu_sockfd->sockfd, readfds);
+        
+        if (dsu_program_state.binded == 0 && dsu_program_state.accepted == 0) {
+            DSU_DEBUG_PRINT(" - Exit (%ld-%ld)\n", (long) getpid(), (long) gettid());
+            exit(EXIT_SUCCESS);    
+        }
+
+
+    }
+
+    /*  Start listening in newest generation. */
+    if (dsu_sockfd->comfd != 0
+        && dsu_sockfd->status[DSU_COUNTER] < dsu_sockfd->internal[DSU_COUNTER]
+        && dsu_sockfd->status[DSU_STATUS] == 0
+    ) {
+        
+        DSU_DEBUG_PRINT(" - Mark ready %d (%ld-%ld)\n", dsu_sockfd->comfd, (long) getpid(), (long) gettid());
+        dsu_sockfd->status[DSU_STATUS] = 1;
+
     }
     
-    int port = -1; int type = -1;
-    DSU_DEBUG_PRINT(" - Read commit port response (%ld-%ld)\n", (long) getpid(), (long) gettid());
-    if (dsu_read_message(dsu_program_state.sockfd, &type, &port) < 0) {
-        perror("DSU \"Read commit response failed\": ");
-        exit(EXIT_FAILURE);
+    /*  Try to get the connection, Not all monitors might be closed and can be in race condition with other processes. */ 
+    if (dsu_sockfd->comfd != 0
+        && dsu_sockfd->status[DSU_COUNTER] < dsu_sockfd->internal[DSU_COUNTER]
+        && dsu_sockfd->status[DSU_STATUS] == 2
+    ) {
+       
+        /* Listen() cannot follow connect() on the same file descriptor. */
+        close(dsu_sockfd->comfd);
+        dsu_sockfd->comfd = socket(AF_UNIX, SOCK_STREAM, 0);
+        
+        DSU_DEBUG_PRINT(" - Try initialize communication on  %d (%ld-%ld)\n", dsu_sockfd->comfd, (long) getpid(), (long) gettid());
+        if (bind(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t) sizeof(dsu_sockfd->comfd_addr)) == 0) {
+            
+            listen(dsu_sockfd->comfd, MAXNUMOFPROC);
+            
+            dsu_sockfd->status[DSU_PGID] = dsu_sockfd->internal[DSU_PGID];
+            dsu_sockfd->status[DSU_COUNTER] = dsu_sockfd->internal[DSU_COUNTER];
+            dsu_sockfd->status[DSU_STATUS] = 0;
+        
+        }
+
     }
-    
-    /*  If the running program acknowledge the commit, transfer it to the committed sockets. Else a new commit is done
-        during new select() cycle. */
-    if (port > 0)
-        dsu_sockets_transfer_fd(&dsu_program_state.binds, &dsu_program_state.exchanged, exchange_socket);
+        
 }
 
-void dsu_clr_fd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
-    /*  Remove socket for the fd_set. */
-    DSU_DEBUG_PRINT(" - %d X (%ld-%ld)\n", dsu_sockfd->sockfd, (long) getpid(), (long) gettid());
-    FD_CLR(dsu_sockfd->sockfd, readfds);
-}
 
 void dsu_set_shadowfd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     /*  Change socket file descripter to its shadow file descriptor. */   
    
-     if (FD_ISSET(dsu_sockfd->sockfd, readfds)) {
+    if (FD_ISSET(dsu_sockfd->sockfd, readfds)) {
 		DSU_DEBUG_PRINT(" - Set %d => %d (%ld-%ld)\n", dsu_sockfd->sockfd, dsu_sockfd->shadowfd, (long) getpid(), (long) gettid());
         FD_CLR(dsu_sockfd->sockfd, readfds);
         FD_SET(dsu_sockfd->shadowfd, readfds);
@@ -358,15 +481,18 @@ void dsu_set_shadowfd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
 	
 }
 
+
 void dsu_set_originalfd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     /*  Change shadow file descripter to its original file descriptor. */
     
-     if (FD_ISSET(dsu_sockfd->shadowfd, readfds)) {
+    if (FD_ISSET(dsu_sockfd->shadowfd, readfds)) {
 		DSU_DEBUG_PRINT(" - Reset %d => %d (%ld-%ld)\n", dsu_sockfd->shadowfd, dsu_sockfd->sockfd, (long) getpid(), (long) gettid());
         FD_CLR(dsu_sockfd->shadowfd, readfds);
         FD_SET(dsu_sockfd->sockfd, readfds);
-     }
+    }
+        
 }
+
 
 int dsu_shadowfd(int sockfd) {
     /*  If sockfd is in the list of binded sockets, return the shadowfd. If not in the list, it is not a
@@ -380,14 +506,23 @@ int dsu_shadowfd(int sockfd) {
 }
 
 
+void dsu_socket_struct_init(struct dsu_socket_struct *dsu_socket) {
+    dsu_socket->port        = 0;
+    dsu_socket->sockfd      = 0;
+    dsu_socket->shadowfd    = 0;
+    dsu_socket->comfd       = 0;
+    dsu_socket->comfds      = NULL;
+    dsu_socket->status      = NULL;
+    dsu_socket->internal[0] = 0;
+    dsu_socket->internal[1] = 0;
+}
+
+
 void dsu_init() {
-    
-	/*  Set default program state. */
-    dsu_program_state.version = DSU_RUNNING_VERSION;
-	
-	/* 	Debugging */
+
 	#if DSU_DEBUG == 1
-	char logfile[DSU_LOG_LEN+1+11+4+1];	
+    int size = snprintf(NULL, 0, "%s-%ld.log", DSU_LOG, (long) getpid());
+	char logfile[size+1];	
 	sprintf(logfile, "%s-%ld.log", DSU_LOG, (long) getpid());
 	dsu_program_state.logfd = fopen(logfile, "w");
 	if (dsu_program_state.logfd == NULL) {
@@ -396,22 +531,13 @@ void dsu_init() {
 	}
 	#endif
 	DSU_DEBUG_PRINT("INIT() (%ld-%ld)\n", (long) getpid(), (long) gettid());
-    
-    /*  Initialize the linked lists. */
+
     dsu_program_state.sockets = NULL;
     dsu_program_state.binds = NULL;
-    dsu_program_state.exchanged = NULL;
-    dsu_program_state.committed = NULL;
 
-    /*  Initialize internal communication. */
-    dsu_program_state.sockfd = 0;
-    dsu_program_state.sub_sockfd = 0;
-    dsu_program_state.connected = 0;
-    
-    /*  Open communication between DSU programs. */
-	
-    dsu_open_communication();
-	DSU_DEBUG_PRINT(" - Communcation fd: %d (%ld-%ld)\n", dsu_program_state.sockfd, (long) getpid(), (long) gettid());    
+    dsu_program_state.binded = 0;
+    dsu_program_state.accepted = 0;
+
 
     return;
 }
@@ -423,24 +549,26 @@ int dsu_socket(int domain, int type, int protocol) {
     /*  With socket() an endpoint for communication is created and returns a file descriptor that refers to that 
         endpoint. The DSU library will connect the file descriptor to a shadow file descriptor. The shadow file 
         descriptor may be recieved from running version. */
-    
+
     int sockfd = socket(domain, type, protocol);
     if (sockfd > 0) {
         /* After successfull creation, add socket to the DSU state. */
         struct dsu_socket_struct dsu_socket;
-        dsu_socket.port = 0;
-        dsu_socket.sockfd = sockfd;
-        dsu_socket.shadowfd = sockfd;
+        dsu_socket_struct_init(&dsu_socket);
+        dsu_socket.shadowfd = dsu_socket.sockfd = sockfd;
         dsu_sockets_add(&dsu_program_state.sockets, dsu_socket);
     }
     
     return sockfd;
 }
 
+
+
 int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     DSU_DEBUG_PRINT("Bind() (%ld-%ld)\n", (long) getpid(), (long) gettid());
     /*  Bind is used to accept a client connection on an socket, this means it is a "public" socket 
         that is ready to accept requests. */
+    
     
     /* Find the metadata of sockfd, and transfer the socket to the state binds. */
     struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd); 
@@ -451,38 +579,97 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         errno = EBADF;
         return -1;
     }
+
+
+    ++dsu_program_state.binded;
+    
     
     /*  To be able to map a socket to the correct socket in the new version the port must be known. 
         therefore we assume it is of the form sockaddr_in. This assumption must be solved and is still
         TO DO. */
     struct sockaddr_in *addr_t; addr_t = (struct sockaddr_in *) addr;
     dsu_socketfd->port = ntohs(addr_t->sin_port);
-
-    /*  If the program is the new version. Ask the file descriptor from the running version. */
-    if (dsu_program_state.version == DSU_NEW_VERSION) {
-        
-        /*  Ask the running program for the file descriptor of corresponding port. */
-        DSU_DEBUG_PRINT(" - Write select port request (%ld-%ld)\n", (long) getpid(), (long) gettid());
-        if ( dsu_write_message(dsu_program_state.sockfd, DSU_MSG_SELECT_REQ, dsu_socketfd->port) < 0) {
-            perror("DSU \"Send msg in bind() failed.\": ");
-            exit(EXIT_FAILURE);
-        }
-        
-        /*  Recieve file descriptor from running version version */
-        int port = 0;
-        DSU_DEBUG_PRINT(" - Read select port response (%ld-%ld)\n", (long) getpid(), (long) gettid());
-        dsu_read_fd(dsu_program_state.sockfd, &dsu_socketfd->shadowfd, &port);
-        if (port >= 0) {
-            /*  On success zero is returned. */
-			DSU_DEBUG_PRINT("  - Recieved fd: %d (%ld-%ld)\n", dsu_socketfd->shadowfd, (long) getpid(), (long) gettid());
-            dsu_sockets_transfer_fd(&dsu_program_state.exchanged, &dsu_program_state.sockets, dsu_socketfd);
-            return 0;
-        }
     
-    }
+    
+    /*  Possibly communicate the socket from the older version. A bind can only be performed once on the same
+        socket, therefore, processes will not communicate with each other. Abstract domain socket cannot be used 
+        in portable programs. But has the advantage that it automatically disappear when all open references to 
+        the socket are closed. */
+    bzero(&dsu_socketfd->comfd_addr, sizeof(dsu_socketfd->comfd_addr));
+    dsu_socketfd->comfd_addr.sun_family = AF_UNIX;
+    sprintf(dsu_socketfd->comfd_addr.sun_path, "X%s_%d.unix", DSU_COMM, dsu_socketfd->port);    // On Linux, sun_path is 108 bytes in size.
+    dsu_socketfd->comfd_addr.sun_path[0] = '\0';                                                // Abstract linux socket.
+    dsu_socketfd->comfd = socket(AF_UNIX, SOCK_STREAM, 0);
+    DSU_DEBUG_PRINT(" - Bind port %d on %d (%ld-%ld)\n", dsu_socketfd->port, sockfd, (long) getpid(), (long) gettid());
+    
+    
+    /*  To communicate the status between the process, shared memory is used. */
+    int pathname_size = snprintf(NULL, 0, "%s_%d", DSU_COMM, dsu_socketfd->port);
+    char pathname[pathname_size+1];
+    sprintf(pathname, "%s_%d", DSU_COMM, dsu_socketfd->port);
+    dsu_socketfd->status_key = ftok(pathname, 1);
+    int shmid = shmget(dsu_socketfd->status_key, 3*sizeof(long), 0666|IPC_CREAT);
+    dsu_socketfd->status = (long *) shmat(shmid, NULL, 0);
+    
 
+    
+    /*  Bind socket, if it fails and already exists we know that another DSU application is 
+        already running. These applications need to know each others listening ports. */
+
+    if ( bind(dsu_socketfd->comfd, (struct sockaddr *) &dsu_socketfd->comfd_addr, (socklen_t) sizeof(dsu_socketfd->comfd_addr)) == -1) {
+
+        if ( errno == EADDRINUSE ) {
+            
+            DSU_DEBUG_PRINT(" - Connect on %d (%ld-%ld)\n", dsu_socketfd->comfd, (long) getpid(), (long) gettid()); 
+            /*  An older version of the program is running, connect to this application over Unix domain socket. */
+            if ( connect(dsu_socketfd->comfd, (struct sockaddr *) &dsu_socketfd->comfd_addr, sizeof(dsu_socketfd->comfd_addr)) != -1) {
+                
+                DSU_DEBUG_PRINT(" - Send on %d (%ld-%ld)\n", dsu_socketfd->comfd, (long) getpid(), (long) gettid());           
+                
+                /*  Ask the running program for the file descriptor of corresponding port. */
+                if ( send(dsu_socketfd->comfd, &dsu_socketfd->port, sizeof(dsu_socketfd->port), 0) > 0) {
+
+                    DSU_DEBUG_PRINT(" - Recieve on %d (%ld-%ld)\n", dsu_socketfd->comfd, (long) getpid(), (long) gettid());
+                    
+                    /*  Recieve file descriptor from running version version. */
+                    int port = 0;
+                    dsu_read_fd(dsu_socketfd->comfd, &dsu_socketfd->shadowfd, &port);
+                    if (port > 0) {
+                        
+                        dsu_socketfd->internal[DSU_PGID] = getpgid(getpid());
+                        dsu_socketfd->internal[DSU_COUNTER] = dsu_socketfd->status[DSU_COUNTER];
+                        
+                        if (dsu_socketfd->status[DSU_PGID] != dsu_socketfd->internal[DSU_PGID])
+                            ++dsu_socketfd->internal[DSU_COUNTER];
+                        
+                        dsu_sockets_transfer_fd(&dsu_program_state.binds, &dsu_program_state.sockets, dsu_socketfd);
+                        
+                        return 0;
+                    }
+                    
+                }
+                
+                DSU_DEBUG_PRINT(" - Close on %d (%ld-%ld)\n", dsu_socketfd->comfd, (long) getpid(), (long) gettid()); 
+                close(dsu_socketfd->comfd);
+            }
+        }
+    }
+    
+    DSU_DEBUG_PRINT(" - Initialize communication on %d (%ld-%ld)\n", dsu_socketfd->comfd, (long) getpid(), (long) gettid());
     /*  Running program does not have the file descriptor, then proceed with normal execution. */
+    listen(dsu_socketfd->comfd, MAXNUMOFPROC);
+    
+    
+    int pid = getpid();
+    dsu_socketfd->internal[DSU_PGID] = getpgid(pid);
+    dsu_socketfd->internal[DSU_COUNTER] = 0;
+    memcpy(dsu_socketfd->status, dsu_socketfd->internal, 2*sizeof(long));
+    dsu_socketfd->status[DSU_STATUS] = 0;
+    
+    
     dsu_sockets_transfer_fd(&dsu_program_state.binds, &dsu_program_state.sockets, dsu_socketfd);
+    
+    
     return bind(sockfd, addr, addrlen);
 }
 
@@ -491,108 +678,81 @@ int dsu_listen(int sockfd, int backlog) {
     /*  listen() marks the socket referred to by sockfd as a passive socket, that is, as a socket that will be
         used to accept incoming connection requests using accept(). */
     
-	/*  If it is the running version, run normal listen() function. */
-    if (dsu_program_state.version == DSU_RUNNING_VERSION) {
-        return listen(sockfd, sockfd);
-	}
+    struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
     
-    /*  If it is the new version, verify if the socket is recieved from the running version. */
-    struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.exchanged, sockfd);
-    if (dsu_socketfd == NULL) {
-        /*  The socket was not correctly captured in the socket() call. Therefore, we need to return
-            error that socket is not correct. On error, -1 is returned, and errno is set to indicate 
-            the error. */
-        errno = EBADF;
-        return -1;
+    /*  The file descriptor is not inherited. */
+    if (dsu_socketfd == NULL || dsu_socketfd->internal[DSU_COUNTER] == 0) {
+        return listen(sockfd, sockfd);
     }
-    /*  If the sockfd and shadowfd are equal, it cannot be recieved from running version. */
-    else if (dsu_socketfd->sockfd == dsu_socketfd->shadowfd)
-        /*  The socket is not recieved from old version and the normal flow must be used. */
-        return listen(sockfd, sockfd);
     
-    /*  The socket is recieved from the old version and listen() does not need to be called. */
+    /*  The socket is recieved from the older generation and listen() does not need to be called. */
 	DSU_DEBUG_PRINT(" - Shadow fd: %d (%ld-%ld)\n", dsu_socketfd->shadowfd, (long) getpid(), (long) gettid());
     return 0;
 }
 
 int dsu_accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
-	DSU_DEBUG_PRINT("Accept() (%ld-%ld)\n", (long) getpid(), (long) gettid());
+	DSU_DEBUG_PRINT("Accept() (%ld-%ld)\n", (long) getpid(), (long) gettid());   
     /*  The accept() system call is used with connection-based socket types (SOCK_STREAM, SOCK_SEQPACKET).  It extracts the first
         connection request on the queue of pending connections for the listening socket, sockfd, creates a new connected socket, and
         returns a new file descriptor referring to that socket. The DSU library need to convert the file descriptor to the shadow
         file descriptor. */     
     
     int shadowfd = dsu_shadowfd(sockfd);
-	int sessionfd = accept(shadowfd, addr, addrlen);
+    
+    int sessionfd = accept(shadowfd, addr, addrlen);
 	if (sessionfd == -1)
 		return sessionfd;
 	
-	/*	The socket must be added to the state to be able to determine termination. This file descriptor does not need a shadow
-		data structure because it will not be transfered to a new version. */
-	struct dsu_socket_struct dsu_socket;
-    dsu_socket.port = 0;
-    dsu_socket.sockfd = sessionfd;
-    dsu_socket.shadowfd = sessionfd;
-	dsu_sockets_add(&dsu_program_state.accepted, dsu_socket);
+	++dsu_program_state.accepted;
 	
     return sessionfd;    
 }
 
 int dsu_accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags) {
 	DSU_DEBUG_PRINT("Accept4() (%ld-%ld)\n", (long) getpid(), (long) gettid());
-    /*  For more information see accept(). */     
+    /*  For more information see dsu_accept(). */     
     int shadowfd = dsu_shadowfd(sockfd);
 	int sessionfd = accept4(shadowfd, addr, addrlen, flags);
 	if (sessionfd == -1)
 		return sessionfd;
-	struct dsu_socket_struct dsu_socket;
-    dsu_socket.port = 0;
-    dsu_socket.sockfd = sessionfd;
-    dsu_socket.shadowfd = sessionfd;
-	dsu_sockets_add(&dsu_program_state.accepted, dsu_socket);
+    
+	++dsu_program_state.accepted;
+    
     return sessionfd;   
 }
 
 int dsu_close(int sockfd) {
 	DSU_DEBUG_PRINT("Close() (%ld-%ld)\n", (long) getpid(), (long) gettid());
 	
+    
 	/* return immediately for these file descriptors. */
-	// STDIN_FILENO
-	// STDOUT_FILENO
-	// STDERR_FILENO
-	struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.accepted, sockfd);
-    if (dsu_socketfd != NULL) {
-		dsu_sockets_remove_fd(&dsu_program_state.accepted, sockfd);
-		return close(sockfd);
-	}
+    if (sockfd == STDIN_FILENO || sockfd == STDOUT_FILENO || sockfd == STDERR_FILENO) {
+        return close(sockfd);
+    }
+
 	
-	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd);
+	struct dsu_socket_struct * dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd);
     if (dsu_socketfd != NULL) {
 		dsu_sockets_remove_fd(&dsu_program_state.sockets, sockfd);
 		return close(sockfd);
-	} 
+	}
 	
+
 	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
 	if (dsu_socketfd != NULL) {
 		dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
+        --dsu_program_state.binded;
 		return close(sockfd);
 	}
+
+
+    /* Then it comes from accept. */
+    --dsu_program_state.accepted;
 	
-	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.exchanged, sockfd);
-	if (dsu_socketfd != NULL) {
-		dsu_sockets_remove_fd(&dsu_program_state.exchanged, sockfd);
-		return close(sockfd);
-	}
-	
-	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.committed, sockfd);
-	if (dsu_socketfd != NULL)
-		dsu_sockets_remove_fd(&dsu_program_state.committed, sockfd);
-	
+
 	return close(sockfd);
 
 }
-
-
 
 
 int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
@@ -600,59 +760,19 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
     /*  select() allows a program to monitor multiple file descriptors, waiting until one or more of the file descriptors 
         become "ready". The DSU library will modify this list by removing file descriptors that are transfered, and change
         file descriptors to their shadow file descriptors. */
+    
+    printf("Binded: %d\n", dsu_program_state.binded);
+    
+    /*  Settle between the different versions. */
+    dsu_forall_sockets(dsu_program_state.binds, dsu_settle_fd, readfds);
 
-    /*  The new version is ready to start listening. A commit message is used to avoid downtime during a long initalization
-        between the bind() and select() functions. So, try to commit the exchanged public sockets. */
-    if (dsu_program_state.version == DSU_NEW_VERSION) {
-        dsu_forall_sockets(dsu_program_state.exchanged, dsu_commit_socket);
-    }
-    
-    /*  Remove committed (successfully transfered) file descriptors. The new version, can only use exchanged file descriptors 
-        after they are committed. */
-    dsu_forall_sockets(dsu_program_state.committed, dsu_clr_fd, readfds);
-    if (dsu_program_state.version == DSU_NEW_VERSION) {    
-        dsu_forall_sockets(dsu_program_state.exchanged, dsu_clr_fd, readfds);
-    }
-    
-    /*  Convert to shadow file descriptors, this must be done for binded sockets. The running version must still handle sockets
-        that are in transfer. So, sockets that are exchanged but not committed, must be mapped to the shadow file. */
+    /*  Convert to shadow file descriptors, this must be done for binded sockets. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_set_shadowfd, readfds);    
-    if (dsu_program_state.version == DSU_RUNNING_VERSION) {
-        dsu_forall_sockets(dsu_program_state.exchanged, dsu_set_shadowfd, readfds);
-    }
     
-    /*  When no new sockets can be accepted, and all accepted sessions are closed, this version can terminate. After recieving the
-		the EOL resposne, the main unix domain socket can be closed. Then a last EOL request is sended over the session to let the 
-		new version know that it can create and be the owner of the unix domain socket. */
-	if (dsu_program_state.binds == NULL && dsu_program_state.accepted == NULL && dsu_program_state.exchanged == NULL) {
-        /*  Disconnect from the running program. */
-        DSU_DEBUG_PRINT(" - Write EOL request (%ld-%ld)\n", (long) getpid(), (long) gettid());        
-        dsu_write_message(dsu_program_state.sub_sockfd, DSU_MSG_EOL_REQ, 0);
-		DSU_DEBUG_PRINT(" - Read EOL response (%ld-%ld)\n", (long) getpid(), (long) gettid());
-        int port = -1; int type = -1;
-        dsu_read_message(dsu_program_state.sub_sockfd, &type, &port);
-		/* 	TO DO, if EOL is rejected, jump over the select(); */		
-		
-		/* 	Close the internal communication sockets. */
-		shutdown(dsu_program_state.sockfd, SHUT_RDWR);
-        close(dsu_program_state.sockfd);
-		shutdown(dsu_program_state.sub_sockfd, SHUT_RDWR);
-		close(dsu_program_state.sub_sockfd);
-		
-		/*  Kill process group. */
-		DSU_DEBUG_PRINT("[Terminate] (%ld-%ld)\n", (long) getpid(), (long) gettid());
-		if (killpg(getpgid(getpid()), SIGKILL)==-1)
-			DSU_DEBUG_PRINT("Terminate error %s (%ld-%ld)\n", strerror(errno), (long) getpid(), (long) gettid());
-		pause();
-		
-    }
+    /*  Sniff on internal communication.  */    
+    dsu_forall_sockets(dsu_program_state.binds, dsu_sniff_conn, readfds);
+
     
-    /*  Sniff on DSU unix domain file descriptor for messages of new versions. */
-    FD_SET(dsu_program_state.sockfd, readfds);
-    if (dsu_program_state.sub_sockfd != 0 && dsu_program_state.version == DSU_RUNNING_VERSION) {
-        FD_SET(dsu_program_state.sub_sockfd, readfds);
-    }
-	
 	#if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if ( FD_ISSET(i, readfds) ) {
@@ -669,110 +789,20 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
 			DSU_DEBUG_PRINT(" - Incomming: %d (%ld-%ld)\n", i, (long) getpid(), (long) gettid());
 		}
 	#endif
-
-    /*  Handle message of the new version. */
-    if (dsu_program_state.version == DSU_RUNNING_VERSION) {
-        
-        if (FD_ISSET(dsu_program_state.sockfd, readfds)) {
-            DSU_DEBUG_PRINT(" - Accept new version request (%ld-%ld)\n", (long) getpid(), (long) gettid());
-            /*  Accept the connection request of the new version. */
-            int size = sizeof(dsu_program_state.sockfd_addr);
-            dsu_program_state.sub_sockfd = accept(dsu_program_state.sockfd, (struct sockaddr *) &dsu_program_state.sockfd_addr, (socklen_t *) &size);
-            if (dsu_program_state.sub_sockfd < 0) {
-                perror("DSU \"Accept Unix domain socket connection requestion error\":");
-		        exit(EXIT_FAILURE);
-            }
-        }
-        
-        if (FD_ISSET(dsu_program_state.sub_sockfd, readfds)) {
-            int type = -1; int port = -1;
-            dsu_read_message(dsu_program_state.sub_sockfd, &type, &port);
-            
-            /*  Transfer the file descriptor to the new version. */
-            if (type == DSU_MSG_SELECT_REQ) {
-                DSU_DEBUG_PRINT(" - Read select port request (%ld-%ld)\n", (long) getpid(), (long) gettid());
-                struct dsu_socket_struct *dsu_sockfd = dsu_sockets_search_port(dsu_program_state.binds, port);                
-                if (dsu_sockfd == NULL) {
-                    /*  If port is not present, send not accepted response. */
-                    DSU_DEBUG_PRINT(" - Write select port %d response (%ld-%ld)\n", port, (long) getpid(), (long) gettid());
-                    dsu_write_fd(dsu_program_state.sub_sockfd, dsu_program_state.sub_sockfd, -1);
-                } else {
-                    /*  Send the socket to the new version. */
-                    dsu_sockfd = dsu_sockets_transfer_fd(&dsu_program_state.exchanged, &dsu_program_state.binds, dsu_sockfd);
-                    DSU_DEBUG_PRINT(" - Write select port %d fd %d response (%ld-%ld)\n", port, dsu_sockfd->shadowfd, (long) getpid(), (long) gettid());
-                    dsu_write_fd(dsu_program_state.sub_sockfd, dsu_sockfd->shadowfd, port);
-                }
-            }
-
-            /*  Stop listening to the socket, it is successfully transfered. */
-            else if (type == DSU_MSG_COMMIT_REQ) {
-                DSU_DEBUG_PRINT(" - Read commit port request (%ld-%ld)\n", (long) getpid(), (long) gettid());
-                struct dsu_socket_struct *dsu_sockfd = dsu_sockets_search_port(dsu_program_state.exchanged, port);
-                /*  Only accept commit if there are no pending requests on the socket. */
-                if (dsu_sockfd != NULL && !FD_ISSET(dsu_sockfd->shadowfd, readfds) ) {
-                    dsu_sockets_transfer_fd(&dsu_program_state.committed, &dsu_program_state.exchanged, dsu_sockfd);
-                } else port = -1;
-                DSU_DEBUG_PRINT(" - Write commit port %d response (%ld-%ld)\n", port, (long) getpid(), (long) gettid());
-                dsu_write_message(dsu_program_state.sub_sockfd, DSU_MSG_COMMIT_RES, port);
-            }
-        }
-
-    }
     
-    /*  Handle message of the running version. */
-    if (dsu_program_state.version == DSU_NEW_VERSION) {
 
-        if (FD_ISSET(dsu_program_state.sockfd, readfds)) {
-            
-            /*  The running version has no more sockets to watch and send an termination message.
-                Switch on Unix domain socket from client to server after confirmation. */
-            int type = -1; int port = -1;
-            DSU_DEBUG_PRINT(" - Read EOL request (%ld-%ld)\n", (long) getpid(), (long) gettid());
-            dsu_read_message(dsu_program_state.sockfd, &type, &port);
-            DSU_DEBUG_PRINT(" - Write EOL response (%ld-%ld)\n", (long) getpid(), (long) gettid());
-            dsu_write_message(dsu_program_state.sockfd, DSU_MSG_EOL_RES, 0);
-            
-            
-			DSU_DEBUG_PRINT("[First version] (%ld-%ld)\n", (long) getpid(), (long) gettid());
-
-            /*  Become first version, change program state and start listening to unix domain socket. */
-            FD_CLR(dsu_program_state.sockfd, readfds);
-			close(dsu_program_state.sockfd);
-            
-			
-			dsu_program_state.version = DSU_RUNNING_VERSION;
-            
-			dsu_program_state.sockfd = socket(AF_UNIX, SOCK_STREAM, 0);
-			while (	bind(dsu_program_state.sockfd, (struct sockaddr *) &dsu_program_state.sockfd_addr, (socklen_t) sizeof(dsu_program_state.sockfd_addr)) == -1) {
-				DSU_DEBUG_PRINT("openDSU error: \"Could not bind to Unix domain socket\" %s (%ld-%ld)\n", strerror(errno), (long) getpid(), (long) gettid());
-				sleep(1);			
-			}
+    /*  Check for connections of new processes. */ 
+    dsu_forall_sockets(dsu_program_state.binds, dsu_acc_conn, readfds);
 
 
-            if (listen(dsu_program_state.sockfd, 1)  < 0) {
-				DSU_DEBUG_PRINT("openDSU error: \"Could not lsiten on Unix domain socket\" (%ld-%ld)\n", (long) getpid(), (long) gettid());
-               	perror("openDSU error: \"Could not lsiten on Unix domain socket\":");
-               	exit(EXIT_FAILURE);
-            }
-           	
-        }
+    /*  Handle messages of new processes. */ 
+    dsu_forall_sockets(dsu_program_state.binds, dsu_handle_conn, readfds);
 
-    }
-    
+
     /* Convert shadow file descriptors back to user level file descriptors to avoid changing the external behaviour. */
-    dsu_forall_sockets(dsu_program_state.binds, dsu_set_originalfd, readfds);    
-    if (dsu_program_state.version == DSU_RUNNING_VERSION) {
-        dsu_forall_sockets(dsu_program_state.exchanged, dsu_set_originalfd, readfds);
-    }
+    dsu_forall_sockets(dsu_program_state.binds, dsu_set_originalfd, readfds);
     
-    FD_CLR(dsu_program_state.sockfd, readfds);
-    FD_CLR(dsu_program_state.sub_sockfd, readfds);
-    
-	return result;
-}
 
-int dsu_epoll_create(int size) {
-	DSU_DEBUG_PRINT("Epoll() (%ld-%ld)\n", (long) getpid(), (long) gettid());
-	return epoll_create(size);
+	return result;
 }
 

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-
+#include <semaphore.h>
 
 #ifdef DEBUG
 #define DSU_DEBUG 1
@@ -21,25 +21,39 @@
 #define HAVE_MSGHDR_MSG_CONTROL 1   // Look this up. !!!!!
 
 
-#define DSU_MSG_SELECT_REQ 1
-#define DSU_MSG_SELECT_RES 2
-#define DSU_MSG_COMMIT_REQ 3
-#define DSU_MSG_COMMIT_RES 4
-#define DSU_MSG_EOL_REQ 5
-#define DSU_MSG_EOL_RES 6
+#define DSU_PGID 0
+#define DSU_COUNTER 1
+#define DSU_STATUS 2
 
 
-#define DSU_COMM "\0dsu_comm.unix"
+#define DSU_COMM "dsu_com"
 #define DSU_COMM_LEN 14
+#define MAXNUMOFPROC 5
+
 #define DSU_LOG "/var/log/dsu"
 #define DSU_LOG_LEN 12
 
+
+struct dsu_comfd_struct {
+    int value;
+    struct dsu_comfd_struct *next;
+};
 
 /*  Ordered linked list for sockets that are bind to port the application.  */
 struct dsu_socket_struct {
     int sockfd;
     int shadowfd;
     int port;
+    
+    /*  Communication. */
+    struct sockaddr_un comfd_addr;
+    int comfd;
+    struct dsu_comfd_struct *comfds;
+    
+    /*  Status. */
+    key_t status_key;
+    long *status;
+    long internal[2];
 };
 
 struct dsu_sockets_struct {
@@ -47,9 +61,10 @@ struct dsu_sockets_struct {
     struct dsu_sockets_struct *next;
 };
 
+
+
 struct dsu_state_struct {
-    /* State of application. */
-    int version;
+
 	#if DSU_DEBUG == 1
 	FILE *logfd;
 	#endif  
@@ -57,15 +72,8 @@ struct dsu_state_struct {
     /* Binded ports of the application. */
     struct dsu_sockets_struct *sockets;
 	struct dsu_sockets_struct *binds;
-    struct dsu_sockets_struct *exchanged;
-    struct dsu_sockets_struct *committed;
-	struct dsu_sockets_struct *accepted;
-    
-    /* Internal communication. */
-    int connected;
-    int sub_sockfd;    
-    int sockfd;
-    struct sockaddr_un sockfd_addr;
+    int binded;
+    int accepted;
 
 };
 
@@ -82,7 +90,6 @@ int dsu_accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict 
 int dsu_close(int sockfd);
 
 int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
-int dsu_epoll_create(int size);
 
 #define DSU_INIT dsu_init()
 
@@ -94,7 +101,6 @@ int dsu_epoll_create(int size);
 #define accept(sockfd, addr, addrlen) dsu_accept(sockfd, addr, addrlen)
 
 #define select(nfds, readfds, writefds, exceptfds, timeout) dsu_select(nfds, readfds, writefds, exceptfds, timeout)
-#define epoll_create(size) dsu_epoll_create(size)
 
 /*********************************************************/
 
