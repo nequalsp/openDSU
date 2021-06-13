@@ -25,6 +25,13 @@
 #define DSU_COUNTER 1
 #define DSU_STATUS 2
 
+#define DSU_ACTIVE 0
+#define DSU_INACTIVE 1
+    
+#define DSU_LISTEN 0
+#define DSU_DUAL 1
+#define DSU_TRANSFERED 2
+#define DSU_LOCKED 3
 
 #define DSU_COMM "dsu_com"
 #define DSU_COMM_LEN 14
@@ -49,11 +56,14 @@ struct dsu_socket_struct {
     struct sockaddr_un comfd_addr;
     int comfd;
     struct dsu_comfd_struct *comfds;
+    key_t status_key;
+    sem_t *sem_id;
+    int locked;
     
     /*  Status. */
-    key_t status_key;
+    
     long *status;
-    long internal[2];
+    long internal[3];
 };
 
 struct dsu_sockets_struct {
