@@ -5,32 +5,29 @@ CFLAGS	+= -g2
 CC?=gcc
 
 LIB=/usr/local/lib/openDSU
+LIBS=-lopenDSU -pthread
 INCLUDE=/usr/local/include/openDSU
 
+
 # File location of test scripts.
-SRC:=version_0
-OBJ:=version_0
-INC:=version_0/includes
-SRCS:=$(wildcard $(SRC)/*.c)
-OBJS:=$(patsubst $(SRC)/%.c,$(SRC)/%.o,$(SRCS))
-INCS:=$(wildcard $(INC)/*.c)
-INCS_OBJ:=$(patsubst $(INC)/%.c,$(INC)/%.o,$(INCS))
+SRC0:=version_0
+SRCS0:=$(wildcard $(SRC0)/*.c)
+OBJS0:=$(patsubst $(SRC0)/%.c,$(SRC0)/%.o,$(SRCS0))
+
+SRC1:=version_1
+SRCS1:=$(wildcard $(SRC1)/*.c)
+OBJS1:=$(patsubst $(SRC1)/%.c,$(SRC1)/%.o,$(SRCS1))
 
 
 # Generate test files.
-test: oracle.o $(INCS_OBJ) $(OBJS)
+test: $(OBJS0) $(OBJS1)
 
-oracle.o:
-	$(CC) $(CFLAGS) -I$(INCLUDE) -L$(LIB) oracle.c -o $@ -lopenDSU
+$(SRC0)/%.o: $(SRC0)/%.c
+	$(CC) $(CFLAGS) -I$(INCLUDE) -L$(LIB) $< -o $@ $(LIBS)
 
-$(INC)/%.o: $(INC)/%.c
-	$(CC) -c $(CFLAGS) -I$(INCLUDE) $< -o $@
-
-$(OBJ)/%.o: $(OBJ)/%.c
-	$(CC) $(CFLAGS) -I$(INCLUDE) -L$(LIB) $< -o $@ $(INCS_OBJ) -lopenDSU
+$(SRC1)/%.o: $(SRC1)/%.c
+	$(CC) $(CFLAGS) -I$(INCLUDE) -L$(LIB) $< -o $@ $(LIBS)
 
 clean:
-	rm -f $(OBJS)
-	rm -f $(OBJS)
-	rm -f $(INCS_OBJ)
-	rm -f oracle.o
+	rm -f $(OBJS0)
+	rm -f $(OBJS1)

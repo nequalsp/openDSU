@@ -25,7 +25,7 @@ while True:
     data = s.recv(BUFFER_SIZE)
     s.close()
     time.sleep(WAIT_TIME) 
-    print(time.perf_counter(), " : ", data.decode())
+    print(round(time.perf_counter(),5), " : ", data.decode())
     
     #ti = ti + 1
     #if ti == UPDATE_TIME:
