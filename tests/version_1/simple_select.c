@@ -85,7 +85,9 @@ int main (int argc, char **argv) {
 						perror("Error reading message");
 						exit(EXIT_FAILURE);
 					} else if (nbytes == 0) {
-						; // Do nothing.
+						/* Close connection. */
+					    close(i);
+	                    FD_CLR(i, &active_fd_set);
 					} else {
 	  					/* Write response. */
 						char response[25] = "Hello, this is version 2\0";
@@ -94,11 +96,7 @@ int main (int argc, char **argv) {
 							perror("Error writing message");
 							exit(EXIT_FAILURE);
 						}
-					}
-					
-					/* Close connection. */
-					close(i);
-	                FD_CLR(i, &active_fd_set);				
+					}				
 	          	}
 	      	}
 		}

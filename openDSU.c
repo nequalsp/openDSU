@@ -329,28 +329,27 @@ void dsu_acc_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     /*  Accept connection requests of new generation. Race conditions could occur because multiple
         processes or threads are listening on the same socket. */
     
-    if (dsu_sockfd->internal[DSU_STATUS] == DSU_ACTIVE 
-        && FD_ISSET(dsu_sockfd->comfd, readfds)
-        && dsu_sockfd->locked == DSU_LOCKED) {
-                        
-            //DSU_DEBUG_PRINT(" ---- Accept IN ---- (%ld-%ld)\n", (long) getpid(), (long) gettid());
-            //fcntl(dsu_sockfd->comfd, F_SETFL, fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK);                         // Handle error.
+    if (    FD_ISSET(dsu_sockfd->comfd, readfds)
+        &&  dsu_sockfd->internal[DSU_STATUS] == DSU_ACTIVE 
+        &&  dsu_sockfd->status[DSU_COUNTER] <= dsu_sockfd->internal[DSU_COUNTER] 
+        &&  dsu_sockfd->locked == DSU_LOCKED) {
             
             int size = sizeof(dsu_sockfd->comfd_addr);
             int acc = accept(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size);
             
-            //fcntl(dsu_sockfd->comfd, F_SETFL, fcntl(dsu_sockfd->comfd, F_GETFL, 0) & (~O_NONBLOCK));                         // Handle error.          
-            //DSU_DEBUG_PRINT(" ---- Accept OUT---- (%ld-%ld)\n", (long) getpid(), (long) gettid());
-            
             if ( acc != -1) {
                 DSU_DEBUG_PRINT(" - Accept %d on %d (%ld-%ld)\n", acc, dsu_sockfd->comfd, (long) getpid(), (long) gettid());
                 dsu_socket_add_comfd(dsu_sockfd, acc);
-            } else
-                DSU_DEBUG_PRINT(" - Not Accepted %d (%ld-%ld)\n", dsu_sockfd->comfd, (long) getpid(), (long) gettid());
+            }
         
     }
+    
+    if (dsu_sockfd->internal[DSU_STATUS] == DSU_ACTIVE) {
+        
+        DSU_DEBUG_PRINT(" - remove: %d (%ld-%ld)\n", dsu_sockfd->comfd, (long) getpid(), (long) gettid());
+        FD_CLR(dsu_sockfd->comfd, readfds);
 
-    FD_CLR(dsu_sockfd->comfd, readfds);
+    }
 
 }
 
@@ -443,17 +442,6 @@ void dsu_settle_fd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
    
     }
 
-    /*  Processes that are active after transfer to the new generation, see this and also change there state. */
-    //if (dsu_sockfd->internal[DSU_STATUS] == DSU_INACTIVE
-    //    && dsu_sockfd->status[DSU_COUNTER] > dsu_sockfd->internal[DSU_COUNTER]
-    //) {
-    //        
-    //    DSU_DEBUG_PRINT(" - close %d and go to next gen (%ld-%ld)\n", dsu_sockfd->comfd, (long) getpid(), (long) gettid());
-    //    close(dsu_sockfd->comfd);
-    //    dsu_sockfd->internal[DSU_STATUS] = DSU_INACTIVE;
-    //    --dsu_program_state.binded;
-   //
-    //}
     
     /*  Old generation stop accepting connections. */
     if (dsu_sockfd->status[DSU_COUNTER] > dsu_sockfd->internal[DSU_COUNTER]) {
@@ -526,6 +514,7 @@ void dsu_set_shadowfd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     /*  Change socket file descripter to its shadow file descriptor. */   
    
     if (FD_ISSET(dsu_sockfd->sockfd, readfds)) {
+        
         FD_CLR(dsu_sockfd->sockfd, readfds);
         DSU_DEBUG_PRINT(" - Try lock %d (%ld-%ld)\n", dsu_sockfd->port, (long) getpid(), (long) gettid());
         if (sem_trywait(dsu_sockfd->sem_id) == 0) {
@@ -846,16 +835,18 @@ int dsu_close(int sockfd) {
 
 int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
 	DSU_DEBUG_PRINT("Select() (%ld-%ld)\n", (long) getpid(), (long) gettid());
-    /*  select() allows a program to monitor multiple file descriptors, waiting until one or more of the file descriptors 
+    /*  Select() allows a program to monitor multiple file descriptors, waiting until one or more of the file descriptors 
         become "ready". The DSU library will modify this list by removing file descriptors that are transfered, and change
         file descriptors to their shadow file descriptors. */
     
+
     #if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if ( FD_ISSET(i, readfds) ) {
 			DSU_DEBUG_PRINT(" - User listening: %d (%ld-%ld)\n", i, (long) getpid(), (long) gettid());
 		}
 	#endif
+
     
     /*  Settle between the different versions. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_settle_fd, readfds);
@@ -871,6 +862,7 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
         tv = *timeout;
     }
     
+
 	#if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if ( FD_ISSET(i, readfds) ) {
@@ -878,9 +870,11 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
 		}
 	#endif
 
+
     int result = select(nfds, readfds, writefds, exceptfds, &tv);
     if (result < 0) return result;
 	
+    
 	#if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if ( FD_ISSET(i, readfds) ) {
@@ -892,26 +886,15 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
     /*  Check for connections of new processes. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_acc_conn, readfds);
     
-    #if DSU_DEBUG == 1
-	for(int i = 0; i < FD_SETSIZE; i++)
-		if ( FD_ISSET(i, readfds) ) {
-			DSU_DEBUG_PRINT(" - User incomming 1: %d (%ld-%ld)\n", i, (long) getpid(), (long) gettid());
-		}
-	#endif
     
     /*  Handle messages of new processes. */ 
     dsu_forall_sockets(dsu_program_state.binds, dsu_handle_conn, readfds);
     
-    #if DSU_DEBUG == 1
-	for(int i = 0; i < FD_SETSIZE; i++)
-		if ( FD_ISSET(i, readfds) ) {
-			DSU_DEBUG_PRINT(" - User incomming 2: %d (%ld-%ld)\n", i, (long) getpid(), (long) gettid());
-		}
-	#endif
 
-    /* Convert shadow file descriptors back to user level file descriptors to avoid changing the external behaviour. */
+    /*  Convert shadow file descriptors back to user level file descriptors to avoid changing the external behaviour. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_set_originalfd, readfds);
 
+    
     #if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if ( FD_ISSET(i, readfds) ) {

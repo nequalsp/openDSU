@@ -65,7 +65,8 @@ int main (int argc, char **argv) {
 		/* Handle each active socket. */
 		for (int i = 0; i < FD_SETSIZE; ++i) {
 			if (FD_ISSET(i, &read_fd_set)) {
-				if (i == sock) {
+				
+                if (i == sock) {
 					/* Accept new connection request. */
 					size_t size = sizeof(clientname);
 					int new = accept(sock, (struct sockaddr *) &clientname, (socklen_t *) &size);
@@ -85,7 +86,9 @@ int main (int argc, char **argv) {
 						perror("Error reading message");
 						exit(EXIT_FAILURE);
 					} else if (nbytes == 0) {
-						; // Do nothing.
+						/* Close connection. */
+					    close(i);
+	                    FD_CLR(i, &active_fd_set);
 					} else {
 	  					/* Write response. */
 						char response[25] = "Hello, this is version 1\0";
@@ -94,11 +97,7 @@ int main (int argc, char **argv) {
 							perror("Error writing message");
 							exit(EXIT_FAILURE);
 						}
-					}
-					
-					/* Close connection. */
-					close(i);
-	                FD_CLR(i, &active_fd_set);				
+					}				
 	          	}
 	      	}
 		}
