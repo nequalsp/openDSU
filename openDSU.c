@@ -1,4 +1,4 @@
-#define _GNU_SOURCE //gettid
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <errno.h>
@@ -19,6 +19,7 @@
 #include <semaphore.h>
 #include <pthread.h>
 #include <sys/msg.h>
+#include <dlfcn.h>
 
 #include "openDSU.h"
 
@@ -29,19 +30,16 @@
 #endif
 
 
-#undef socket
-#undef bind
-#undef listen
-#undef accept
-#undef accept4
-#undef close
-
-#undef select
-
-
 /* Global state variable */
 struct dsu_state_struct dsu_program_state;
 
+int (*dsu_socket)(int, int, int);
+int (*dsu_bind)(int, const struct sockaddr *, socklen_t);
+int (*dsu_listen)(int, int);
+int (*dsu_accept)(int, struct sockaddr *restrict, socklen_t *restrict);
+int (*dsu_accept4)(int, struct sockaddr *restrict, socklen_t *restrict, int);
+int (*dsu_close)(int);
+int (*dsu_select)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 
 struct dsu_socket_struct *dsu_sockets_add(struct dsu_sockets_struct **socket, struct dsu_socket_struct value) {  
 
@@ -180,6 +178,25 @@ void dsu_socket_remove_comfd(struct dsu_socket_struct *socket, int comfd) {
 
 }
 
+struct dsu_socket_struct *dsu_sockets_search_comfd(struct dsu_sockets_struct *socket, int sockfd) {
+	/*	List in list. */    
+
+    while (socket != NULL) {
+		
+		struct dsu_comfd_struct *comfds = socket->value.comfds;
+
+		while(comfds->next != NULL) {
+		
+			if (comfds->value == sockfd) return &socket->value;
+        	
+			socket = socket->next;
+
+		}
+    }
+    
+    return NULL;
+}
+
 #define dsu_forall_sockets(x, y, ...) { struct dsu_sockets_struct *dsu_socket_loop = x;\
                                         while (dsu_socket_loop != NULL) {\
                                             (*y)(&dsu_socket_loop->value, ## __VA_ARGS__);\
@@ -296,7 +313,6 @@ int dsu_read_fd(int fd, int *recvfd, int *port) {
 }
 
 
-
 void dsu_sniff_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     /*  Listen under the hood to accepted connections on public socket. A new generation can request
         file descriptors. During DUAL listening, only one  */
@@ -331,16 +347,16 @@ void dsu_acc_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     
     if (    FD_ISSET(dsu_sockfd->comfd, readfds)
         &&  dsu_sockfd->internal[DSU_STATUS] == DSU_ACTIVE 
-        &&  dsu_sockfd->status[DSU_COUNTER] <= dsu_sockfd->internal[DSU_COUNTER] 
-        &&  dsu_sockfd->locked == DSU_LOCKED) {
+        &&  dsu_sockfd->status[DSU_COUNTER] <= dsu_sockfd->internal[DSU_COUNTER] ) {
             
             int size = sizeof(dsu_sockfd->comfd_addr);
-            int acc = accept(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size);
+            int acc = dsu_accept(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size);
             
             if ( acc != -1) {
                 DSU_DEBUG_PRINT(" - Accept %d on %d (%ld-%ld)\n", acc, dsu_sockfd->comfd, (long) getpid(), (long) gettid());
                 dsu_socket_add_comfd(dsu_sockfd, acc);
-            }
+            } else
+				DSU_DEBUG_PRINT(" - Accept failed (%ld-%ld)\n", (long) getpid(), (long) gettid());
         
     }
     
@@ -377,7 +393,7 @@ void dsu_handle_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
                 
                 DSU_DEBUG_PRINT(" - Close on %d (%ld-%ld)\n", comfds->value, (long) getpid(), (long) gettid());
                                  
-                close(comfds->value);
+                dsu_close(comfds->value);
                 FD_CLR(comfds->value, readfds);
                 
                 struct dsu_comfd_struct *_comfds = comfds;
@@ -435,7 +451,7 @@ void dsu_settle_fd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     ) {
             
         DSU_DEBUG_PRINT(" - close %d and go to next gen (%ld-%ld)\n", dsu_sockfd->port, (long) getpid(), (long) gettid());
-        close(dsu_sockfd->comfd);
+        dsu_close(dsu_sockfd->comfd);
         dsu_sockfd->internal[DSU_STATUS] = DSU_INACTIVE;
         dsu_sockfd->status[DSU_STATUS] = DSU_TRANSFERED;
         --dsu_program_state.binded;
@@ -464,7 +480,7 @@ void dsu_settle_fd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
         && dsu_sockfd->status[DSU_STATUS] == DSU_LISTEN
     ) {
         
-        DSU_DEBUG_PRINT(" - Mark ready %d (%ld-%ld)\n", dsu_sockfd->comfd, (long) getpid(), (long) gettid());
+        DSU_DEBUG_PRINT(" - Mark ready %d (%ld-%ld)\n", dsu_sockfd->port, (long) getpid(), (long) gettid());
         dsu_sockfd->status[DSU_STATUS] = DSU_DUAL;
 
     }
@@ -475,16 +491,18 @@ void dsu_settle_fd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     ) {
        
         /* Listen() cannot follow connect() on the same file descriptor. */
-        close(dsu_sockfd->comfd);
+        dsu_close(dsu_sockfd->comfd);
         dsu_sockfd->comfd = socket(AF_UNIX, SOCK_STREAM, 0);
         
         /*  Bind() and listen() are thread safe. Only one process or thread will be able to reserve the port. */
-        DSU_DEBUG_PRINT(" - Try initialize communication on  %d (%ld-%ld)\n", dsu_sockfd->comfd, (long) getpid(), (long) gettid());
-        if (bind(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t) sizeof(dsu_sockfd->comfd_addr)) == 0) {
+        DSU_DEBUG_PRINT(" - Try takeover communication on  %d (%ld-%ld)\n", dsu_sockfd->port, (long) getpid(), (long) gettid());
+        if (dsu_bind(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t) sizeof(dsu_sockfd->comfd_addr)) == 0) {
             
-            if (listen(dsu_sockfd->comfd, MAXNUMOFPROC) == 0) {
+            if (dsu_listen(dsu_sockfd->comfd, MAXNUMOFPROC) == 0) {
                 
-                DSU_DEBUG_PRINT(" - Initialize communication on  %d (%ld-%ld)\n", dsu_sockfd->comfd, (long) getpid(), (long) gettid());
+				fcntl(dsu_sockfd->comfd, F_SETFL, fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK); // Set non-blocking, several might be accepting connections.
+				
+                DSU_DEBUG_PRINT(" - Takeover communication on  %d (%ld-%ld)\n", dsu_sockfd->port, (long) getpid(), (long) gettid());
                 
                 dsu_sockfd->status[DSU_PGID] = dsu_sockfd->internal[DSU_PGID];
                 dsu_sockfd->status[DSU_COUNTER] = dsu_sockfd->internal[DSU_COUNTER];
@@ -567,7 +585,7 @@ void dsu_socket_struct_init(struct dsu_socket_struct *dsu_socket) {
     dsu_socket->comfd       = 0;
     dsu_socket->comfds      = NULL;
     dsu_socket->status      = NULL;
-    dsu_socket->internal[0] = DSU_LISTEN;
+    dsu_socket->internal[0] = 0;
     dsu_socket->internal[1] = 0;
     dsu_socket->internal[2] = DSU_INACTIVE;
     dsu_socket->sem_id      = NULL;
@@ -575,7 +593,7 @@ void dsu_socket_struct_init(struct dsu_socket_struct *dsu_socket) {
 }
 
 
-void dsu_init() {
+static __attribute__((constructor)) void dsu_init() {
 
 	#if DSU_DEBUG == 1
     int size = snprintf(NULL, 0, "%s-%ld.log", DSU_LOG, (long) getpid());
@@ -596,18 +614,28 @@ void dsu_init() {
     dsu_program_state.accepted = 0;
 
 
+	/*  Wrappers around system function. RTLD_NEXT will find the next occurrence of a function in the search 
+		order after the current library*/
+	dsu_socket = dlsym(RTLD_NEXT, "socket");
+	dsu_bind = dlsym(RTLD_NEXT, "bind");
+	dsu_listen = dlsym(RTLD_NEXT, "listen");
+	dsu_accept = dlsym(RTLD_NEXT, "accept");
+	dsu_accept4 = dlsym(RTLD_NEXT, "accept4");
+	dsu_close = dlsym(RTLD_NEXT, "close");
+	dsu_select = dlsym(RTLD_NEXT, "select");
+
     return;
 }
 
 
 
-int dsu_socket(int domain, int type, int protocol) {
+int socket(int domain, int type, int protocol) {
     DSU_DEBUG_PRINT("Socket() (%ld-%ld)\n", (long) getpid(), (long) gettid());
     /*  With socket() an endpoint for communication is created and returns a file descriptor that refers to that 
         endpoint. The DSU library will connect the file descriptor to a shadow file descriptor. The shadow file 
         descriptor may be recieved from running version. */
 
-    int sockfd = socket(domain, type, protocol);
+    int sockfd = dsu_socket(domain, type, protocol);
     if (sockfd > 0) {
         /* After successfull creation, add socket to the DSU state. */
         struct dsu_socket_struct dsu_socket;
@@ -621,7 +649,7 @@ int dsu_socket(int domain, int type, int protocol) {
 
 
 
-int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
+int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     DSU_DEBUG_PRINT("Bind() (%ld-%ld)\n", (long) getpid(), (long) gettid());
     /*  Bind is used to accept a client connection on an socket, this means it is a "public" socket 
         that is ready to accept requests. */
@@ -665,18 +693,17 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     int shmid = shmget(dsu_socketfd->status_key, 3*sizeof(long), 0666|IPC_CREAT);
     dsu_socketfd->status = (long *) shmat(shmid, NULL, 0);
 
-    
-    /*  During the transition a lock is needed. */
+
+	/*  During the transition a lock is needed. */
     int pathname_size_sem = snprintf(NULL, 0, "/%s_%d.semaphore", DSU_COMM, dsu_socketfd->port);
     char pathname_sem[pathname_size_sem+1];
     sprintf(pathname_sem, "%s_%d", DSU_COMM, dsu_socketfd->port);
-    //pathname_sem[1] = '\0';
+    sem_unlink(pathname_sem);
     
     
     /*  Bind socket, if it fails and already exists we know that another DSU application is 
         already running. These applications need to know each others listening ports. */
-
-    if ( bind(dsu_socketfd->comfd, (struct sockaddr *) &dsu_socketfd->comfd_addr, (socklen_t) sizeof(dsu_socketfd->comfd_addr)) == -1) {
+    if ( dsu_bind(dsu_socketfd->comfd, (struct sockaddr *) &dsu_socketfd->comfd_addr, (socklen_t) sizeof(dsu_socketfd->comfd_addr)) == -1) {
 
         if ( errno == EADDRINUSE ) {
             
@@ -703,7 +730,7 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
                         if (dsu_socketfd->status[DSU_PGID] != dsu_socketfd->internal[DSU_PGID])
                             ++dsu_socketfd->internal[DSU_COUNTER];
                         
-                        dsu_socketfd->sem_id = sem_open(pathname, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+                        dsu_socketfd->sem_id = sem_open(pathname_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
                         
                         DSU_DEBUG_PRINT(" - Close on %d (%ld-%ld)\n", dsu_socketfd->comfd, (long) getpid(), (long) gettid()); 
                         close(dsu_socketfd->comfd);
@@ -719,18 +746,18 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     }
     
 
-    DSU_DEBUG_PRINT(" - Initialize communication on %d (%ld-%ld)\n", dsu_socketfd->comfd, (long) getpid(), (long) gettid());
+    DSU_DEBUG_PRINT(" - Initialize communication on %d (%ld-%ld)\n", dsu_socketfd->port, (long) getpid(), (long) gettid());
     /*  Running program does not have the file descriptor, then proceed with normal execution. */
     listen(dsu_socketfd->comfd, MAXNUMOFPROC);
-    
-
-    sem_unlink(pathname_sem);
+	fcntl(dsu_socketfd->comfd, F_SETFL, fcntl(dsu_socketfd->comfd, F_GETFL, 0) | O_NONBLOCK); // Set non-blocking, several might be accepting connections.
+	
+	 	
+	sem_unlink(pathname_sem); // Semaphore does not terminate after exit.
     dsu_socketfd->sem_id = sem_open(pathname_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
     sem_init(dsu_socketfd->sem_id, PTHREAD_PROCESS_SHARED, 1);
     
 
-    int pid = getpid();
-    dsu_socketfd->internal[DSU_PGID] = getpgid(pid);
+    dsu_socketfd->internal[DSU_PGID] = getpgid(getpid());
     dsu_socketfd->internal[DSU_COUNTER] = 0;
     dsu_socketfd->internal[DSU_STATUS] = DSU_ACTIVE;
     memcpy(dsu_socketfd->status, dsu_socketfd->internal, 3*sizeof(long));
@@ -742,10 +769,10 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     ++dsu_program_state.binded;
     
     
-    return bind(sockfd, addr, addrlen);
+    return dsu_bind(sockfd, addr, addrlen);
 }
 
-int dsu_listen(int sockfd, int backlog) {
+int listen(int sockfd, int backlog) {
     DSU_DEBUG_PRINT("Listen() on fd %d (%ld-%ld)\n", sockfd, (long) getpid(), (long) gettid());
     /*  listen() marks the socket referred to by sockfd as a passive socket, that is, as a socket that will be
         used to accept incoming connection requests using accept(). */
@@ -754,7 +781,7 @@ int dsu_listen(int sockfd, int backlog) {
     
     /*  The file descriptor is not inherited. */
     if (dsu_socketfd == NULL || dsu_socketfd->internal[DSU_COUNTER] == 0) {
-        return listen(sockfd, sockfd);
+        return dsu_listen(sockfd, sockfd);
     }
     
     /*  The socket is recieved from the older generation and listen() does not need to be called. */
@@ -762,16 +789,16 @@ int dsu_listen(int sockfd, int backlog) {
     return 0;
 }
 
-int dsu_accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
+int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
 	DSU_DEBUG_PRINT("Accept() (%ld-%ld)\n", (long) getpid(), (long) gettid());   
     /*  The accept() system call is used with connection-based socket types (SOCK_STREAM, SOCK_SEQPACKET).  It extracts the first
         connection request on the queue of pending connections for the listening socket, sockfd, creates a new connected socket, and
         returns a new file descriptor referring to that socket. The DSU library need to convert the file descriptor to the shadow
-        file descriptor. */     
+        file descriptor. */
     
     int shadowfd = dsu_shadowfd(sockfd);
     
-    int sessionfd = accept(shadowfd, addr, addrlen);
+    int sessionfd = dsu_accept(shadowfd, addr, addrlen);
 	if (sessionfd == -1)
 		return sessionfd;
 	
@@ -782,13 +809,13 @@ int dsu_accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict a
     return sessionfd;    
 }
 
-int dsu_accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags) {
+int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags) {
 	DSU_DEBUG_PRINT("Accept4() (%ld-%ld)\n", (long) getpid(), (long) gettid());
     /*  For more information see dsu_accept(). */     
     
     int shadowfd = dsu_shadowfd(sockfd);
 	
-    int sessionfd = accept4(shadowfd, addr, addrlen, flags);
+    int sessionfd = dsu_accept4(shadowfd, addr, addrlen, flags);
 	if (sessionfd == -1)
 		return sessionfd;
     
@@ -799,20 +826,20 @@ int dsu_accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict 
     return sessionfd;   
 }
 
-int dsu_close(int sockfd) {
+int close(int sockfd) {
 	DSU_DEBUG_PRINT("Close() (%ld-%ld)\n", (long) getpid(), (long) gettid());
-	
-    
+
+
 	/* Return immediately for these file descriptors. */
     if (sockfd == STDIN_FILENO || sockfd == STDOUT_FILENO || sockfd == STDERR_FILENO) {
-        return close(sockfd);
+        return dsu_close(sockfd);
     }
 
 	
 	struct dsu_socket_struct * dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd);
     if (dsu_socketfd != NULL) {
 		dsu_sockets_remove_fd(&dsu_program_state.sockets, sockfd);
-		return close(sockfd);
+		return dsu_close(sockfd);
 	}
 	
 
@@ -820,25 +847,29 @@ int dsu_close(int sockfd) {
 	if (dsu_socketfd != NULL) {
 		dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
         --dsu_program_state.binded;
-		return close(sockfd);
+		return dsu_close(sockfd);
 	}
 
 
-    /* Then it comes from accept. */
-    --dsu_program_state.accepted;
-	
+	dsu_socketfd = dsu_sockets_search_comfd(dsu_program_state.binds, sockfd);
+	if (dsu_socketfd != NULL) {
+		dsu_socket_remove_comfd(dsu_socketfd, sockfd);
+        --dsu_program_state.accepted;
+		return dsu_close(sockfd);
+	}
 
-	return close(sockfd);
+
+	return dsu_close(sockfd);
 
 }
 
 
-int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
+int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
 	DSU_DEBUG_PRINT("Select() (%ld-%ld)\n", (long) getpid(), (long) gettid());
     /*  Select() allows a program to monitor multiple file descriptors, waiting until one or more of the file descriptors 
         become "ready". The DSU library will modify this list by removing file descriptors that are transfered, and change
         file descriptors to their shadow file descriptors. */
-    
+
 
     #if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
@@ -871,7 +902,7 @@ int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, s
 	#endif
 
 
-    int result = select(nfds, readfds, writefds, exceptfds, &tv);
+    int result = dsu_select(nfds, readfds, writefds, exceptfds, &tv);
     if (result < 0) return result;
 	
     

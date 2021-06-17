@@ -1,17 +1,17 @@
-#include <openDSU.h>
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <sys/un.h>
 #include <sys/ipc.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 
 
 #define PORT    3000
@@ -19,8 +19,6 @@
 
 
 int main (int argc, char **argv) {
-    
-    DSU_INIT;
     
 	/* Create the socket. */
 	struct sockaddr_in name;

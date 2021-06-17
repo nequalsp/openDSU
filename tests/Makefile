@@ -4,9 +4,7 @@ CFLAGS	+= -O3
 CFLAGS	+= -g2
 CC?=gcc
 
-LIB=/usr/local/lib/openDSU
-LIBS=-lopenDSU -pthread
-INCLUDE=/usr/local/include/openDSU
+LIBS=-pthread
 
 
 # File location of test scripts.
@@ -23,10 +21,10 @@ OBJS1:=$(patsubst $(SRC1)/%.c,$(SRC1)/%.o,$(SRCS1))
 test: $(OBJS0) $(OBJS1)
 
 $(SRC0)/%.o: $(SRC0)/%.c
-	$(CC) $(CFLAGS) -I$(INCLUDE) -L$(LIB) $< -o $@ $(LIBS)
+	$(CC) $(CFLAGS) $< -o $@ $(LIBS)
 
 $(SRC1)/%.o: $(SRC1)/%.c
-	$(CC) $(CFLAGS) -I$(INCLUDE) -L$(LIB) $< -o $@ $(LIBS)
+	$(CC) $(CFLAGS) $< -o $@ $(LIBS)
 
 clean:
 	rm -f $(OBJS0)

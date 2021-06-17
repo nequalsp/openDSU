@@ -1,5 +1,3 @@
-#include <openDSU.h>
-
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -19,8 +17,6 @@
 
 
 int main (int argc, char **argv) {
-    
-    DSU_INIT;
     
 	/* Create the socket. */
 	struct sockaddr_in name;

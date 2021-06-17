@@ -6,7 +6,6 @@ CC?=gcc
 
 DEBUG= -D DEBUG	
 LIB=/usr/local/lib/openDSU
-INCLUDE=/usr/local/include/openDSU
 
 # File location of test scripts.
 SRC:=tests/version_0
@@ -18,31 +17,31 @@ INCS:=$(wildcard $(INC)/*.c)
 INCS_OBJ:=$(patsubst $(INC)/%.c,$(INC)/%.o,$(INCS))
 
 
-all: build install test
+all: build openDSU install test
+
+rebuild: clean build test
 
 
 # Compile shared library.	
 build: libopenDSU.so
 
-openDSU.o: openDSU.c
-	$(CC) -c $(CFLAGS) -fpic $< -o $@ $(DEBUG)
+libopenDSU.so: openDSU.c
+	$(CC) $(CFLAGS) -shared -fPIC $< -o $@ $(DEBUG) -ldl
 
-libopenDSU.so: openDSU.o
-	$(CC) -shared $< -o $@ $(DEBUG)
+openDSU: install/exec.c
+	$(CC) $(CFLAGS) $< -o $@
 
-
-install: build
+install: build openDSU
 	$(MAKE) -C ./install install
 
 uninstall:
 	$(MAKE) -C ./install uninstall
-
 
 test:
 	$(MAKE) -C ./tests test
 
 clean:
 	rm -f libopenDSU.so
-	rm -f openDSU.o
+	rm -f openDSU
 	$(MAKE) -C ./tests clean
 

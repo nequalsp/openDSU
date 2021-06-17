@@ -48,6 +48,7 @@ struct dsu_comfd_struct {
     struct dsu_comfd_struct *next;
 };
 
+
 /*  Ordered linked list for sockets that are bind to port the application.  */
 struct dsu_socket_struct {
     int sockfd;
@@ -68,11 +69,11 @@ struct dsu_socket_struct {
     long internal[3];
 };
 
+
 struct dsu_sockets_struct {
     struct dsu_socket_struct value;
     struct dsu_sockets_struct *next;
 };
-
 
 
 struct dsu_state_struct {
@@ -89,30 +90,18 @@ struct dsu_state_struct {
 
 };
 
-/* Global state variable */
+
+/* Global state variables */
 extern struct dsu_state_struct dsu_program_state;
 
-void dsu_init();
+extern int (*dsu_socket)(int, int, int);
+extern int (*dsu_bind)(int, const struct sockaddr *, socklen_t);
+extern int (*dsu_listen)(int, int);
+extern int (*dsu_accept)(int, struct sockaddr *restrict, socklen_t *restrict);
+extern int (*dsu_accept4)(int, struct sockaddr *restrict, socklen_t *restrict, int);
+extern int (*dsu_close)(int);
+extern int (*dsu_select)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 
-int dsu_socket(int domain, int type, int protocol);
-int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen);
-int dsu_listen(int sockfd, int backlog);
-int dsu_accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen);
-int dsu_accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags);
-int dsu_close(int sockfd);
-
-int dsu_select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout);
-
-#define DSU_INIT dsu_init()
-
-#define socket(domain, type, protocol) dsu_socket(domain, type, protocol)
-#define bind(sockfd, addr, addrlen) dsu_bind(sockfd, addr, addrlen)
-#define listen(sockfd, backlog) dsu_listen(sockfd, backlog)
-#define close(sockfd) dsu_close(sockfd)
-#define accept4(sockfd, addr, addrlen, flags) dsu_accept4(sockfd, addr, addrlen, flags)
-#define accept(sockfd, addr, addrlen) dsu_accept(sockfd, addr, addrlen)
-
-#define select(nfds, readfds, writefds, exceptfds, timeout) dsu_select(nfds, readfds, writefds, exceptfds, timeout)
 
 /*********************************************************/
 
