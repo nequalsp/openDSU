@@ -22,8 +22,7 @@
 
 
 #define DSU_PGID 0
-#define DSU_COUNTER 1
-#define DSU_STATUS 2
+#define DSU_VERSION 1
 
 #define DSU_ACTIVE 0
 #define DSU_INACTIVE 1
@@ -59,14 +58,18 @@ struct dsu_socket_struct {
     struct sockaddr_un comfd_addr;
     int comfd;
     struct dsu_comfd_struct *comfds;
-    key_t status_key;
-    sem_t *sem_id;
-    int locked;
+    
     
     /*  Status. */
-    
+	int monitoring;
+	int locking;
+	long version;
+
+	sem_t *status_sem;
+	sem_t *fd_sem;	
+	int locked;
+	
     long *status;
-    long internal[3];
 };
 
 
