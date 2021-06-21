@@ -23,16 +23,16 @@
 
 #define DSU_PGID 0
 #define DSU_VERSION 1
+#define DSU_TRANSFER 2
 
 #define DSU_ACTIVE 0
 #define DSU_INACTIVE 1
     
-#define DSU_LISTEN 0
-#define DSU_DUAL 1
-#define DSU_TRANSFERED 2
-
 #define DSU_UNLOCKED 0
 #define DSU_LOCKED 1
+
+#define DSU_MONITOR 0
+#define DSU_NONMONITOR 1
 
 #define DSU_COMM "dsu_com"
 #define DSU_COMM_LEN 14
@@ -59,16 +59,13 @@ struct dsu_socket_struct {
     int comfd;
     struct dsu_comfd_struct *comfds;
     
-    
     /*  Status. */
 	int monitoring;
-	int locking;
 	long version;
-
-	sem_t *status_sem;
-	sem_t *fd_sem;	
 	int locked;
 	
+	sem_t *status_sem;
+	sem_t *fd_sem;	
     long *status;
 };
 
