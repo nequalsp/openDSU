@@ -1,61 +1,79 @@
-#define _GNU_SOURCE
-
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <sys/un.h>
 #include <sys/ipc.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <fcntl.h>
 
-#define PORT    3000
+
+#define PORT1    3000
+#define PORT2    3001
 #define MAXMSG  512
 
 
 int main (int argc, char **argv) {
     
 	/* Create the socket. */
-	struct sockaddr_in name;
-	int sock = socket(PF_INET, SOCK_STREAM, 0);
-	if (sock < 0) {
+	struct sockaddr_in name1;
+	int sock1 = socket(PF_INET, SOCK_STREAM, 0);
+	if (sock1 < 0) {
 		perror ("Error creating socket");
 		exit (EXIT_FAILURE);
 	}
 
 	/* Bind socket. */
-	name.sin_family = AF_INET;
-	name.sin_port = htons(PORT);
-	name.sin_addr.s_addr = htonl(INADDR_ANY);
-	if (bind(sock, (struct sockaddr *) &name, sizeof(name)) < 0) {
+	name1.sin_family = AF_INET;
+	name1.sin_port = htons(PORT1);
+	name1.sin_addr.s_addr = htonl(INADDR_ANY);
+	if (bind(sock1, (struct sockaddr *) &name1, sizeof(name1)) < 0) {
 		perror("Error binding");
 		exit (EXIT_FAILURE);
 	}
 
 	/* Listen on socket. */
-	if (listen(sock, 1) < 0)
+	if (listen(sock1, 1) < 0)
+    {
+      perror("Error start listening on socket");
+      exit(EXIT_FAILURE);
+    }
+	
+	/* Create another the socket. */
+	struct sockaddr_in name2;
+	int sock2 = socket(PF_INET, SOCK_STREAM, 0);
+	if (sock2 < 0) {
+		perror ("Error creating socket");
+		exit (EXIT_FAILURE);
+	}
+	/* Bind socket. */
+	name2.sin_family = AF_INET;
+	name2.sin_port = htons(PORT2);
+	name2.sin_addr.s_addr = htonl(INADDR_ANY);
+	if (bind(sock2, (struct sockaddr *) &name2, sizeof(name2)) < 0) {
+		perror("Error binding");
+		exit (EXIT_FAILURE);
+	}
+
+	/* Listen on socket. */
+	if (listen(sock2, 1) < 0)
     {
       perror("Error start listening on socket");
       exit(EXIT_FAILURE);
     }
 
-	/* Must be non-blocking, otherwise race conditions could happen. */
-	fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
-
 	/* Initialize the set of active sockets. */
 	fd_set active_fd_set, read_fd_set;
 	struct sockaddr_in clientname;
   	FD_ZERO(&active_fd_set);
-  	FD_SET(sock, &active_fd_set);
-    
-    fork();
-    
-	printf("Start listening on port %d...\n", PORT);
+  	FD_SET(sock1, &active_fd_set);
+	FD_SET(sock2, &active_fd_set);
+
+	printf("Start listening on port %d & %d...\n", PORT1, PORT2);
 	while (1)
 	{
 		/* Wait for active socket. */
@@ -68,16 +86,17 @@ int main (int argc, char **argv) {
 		/* Handle each active socket. */
 		for (int i = 0; i < FD_SETSIZE; ++i) {
 			if (FD_ISSET(i, &read_fd_set)) {
-				if (i == sock) {
-
+				
+                if (i == sock1 || i == sock2) {
 					/* Accept new connection request. */
 					size_t size = sizeof(clientname);
-					int new = accept4(sock, (struct sockaddr *) &clientname, (socklen_t *) &size, SOCK_NONBLOCK);
-					if (new > 0)
-						FD_SET(new, &active_fd_set);
-
+					int new = accept(i, (struct sockaddr *) &clientname, (socklen_t *) &size);
+					if (new < 0) {
+						perror("Error accepting message");
+						exit(EXIT_FAILURE);
+					}
+	            	FD_SET(new, &active_fd_set);
 				} else {
-
 					/* Read message. */
 					char buffer[MAXMSG];
   					int nbytes;
@@ -99,7 +118,7 @@ int main (int argc, char **argv) {
 							perror("Error writing message");
 							exit(EXIT_FAILURE);
 						}
-					}
+					}				
 	          	}
 	      	}
 		}

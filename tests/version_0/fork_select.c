@@ -12,6 +12,7 @@
 #include <sys/shm.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 
 
 #define PORT    3000
@@ -43,6 +44,9 @@ int main (int argc, char **argv) {
       perror("Error start listening on socket");
       exit(EXIT_FAILURE);
     }
+	
+	/* Must be non-blocking, otherwise race conditions could happen. */
+	fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
 
 	/* Initialize the set of active sockets. */
 	fd_set active_fd_set, read_fd_set;
@@ -72,6 +76,8 @@ int main (int argc, char **argv) {
 					int new = accept4(sock, (struct sockaddr *) &clientname, (socklen_t *) &size, SOCK_NONBLOCK);
 					if (new > 0)
 						FD_SET(new, &active_fd_set);
+					else
+						perror("Accept4");
 
 				} else {
 

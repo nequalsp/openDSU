@@ -17,6 +17,10 @@ WAIT_TIME = 1
 UPDATE_TIME = 5
 
 
+if len(sys.argv) > 1:
+	TCP_PORT = int(sys.argv[1])
+
+
 def remove_process(signal, frame): # ctr-c
     global processes
     global states

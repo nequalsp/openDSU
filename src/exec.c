@@ -2,7 +2,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define LD_PRELOAD_LIB "LD_PRELOAD=$LD_PRELOAD:/usr/local/lib/openDSU/libopenDSU.so"
+
+#define LD_PRELOAD_LIB "LD_PRELOAD=$LD_PRELOAD:/usr/local/lib/libopenDSU.so"
+
 
 int main (int argc, char *argv[]) {
     
@@ -32,7 +34,7 @@ int main (int argc, char *argv[]) {
     
     /* Execute the command. */
     if (system(command) == -1)
-        perror("DSU execution failed");
+        perror("DSU");
     
     return 0;
 } 

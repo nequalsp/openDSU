@@ -1,47 +1,41 @@
-# Compilation settings
 CFLAGS	+= -Wall -Werror
 CFLAGS	+= -O3
 CFLAGS	+= -g2
 CC?=gcc
 
-DEBUG= -D DEBUG	
-LIB=/usr/local/lib/openDSU
 
-# File location of test scripts.
-SRC:=tests/version_0
-OBJ:=tests/version_0
-INC:=tests/version_0/includes
-SRCS:=$(wildcard $(SRC)/*.c)
-OBJS:=$(patsubst $(SRC)/%.c,$(SRC)/%.o,$(SRCS))
-INCS:=$(wildcard $(INC)/*.c)
-INCS_OBJ:=$(patsubst $(INC)/%.c,$(INC)/%.o,$(INCS))
+DEBUG= -D DEBUG
+
+	
+LIB=/usr/local/lib
+BIN=/usr/local/bin
 
 
-all: build openDSU install test
-
-rebuild: clean build test
+all: build install test
 
 
-# Compile shared library.	
-build: libopenDSU.so
+build: 
+	$(MAKE) -C ./src build
 
-libopenDSU.so: openDSU.c
-	$(CC) $(CFLAGS) -shared -fPIC $< -o $@ $(DEBUG) -ldl
 
-openDSU: install/exec.c
-	$(CC) $(CFLAGS) $< -o $@
+install: 
+	cp libopenDSU.so $(LIB)/libopenDSU.so
+	cp openDSU $(BIN)/openDSU
 
-install: build openDSU
-	$(MAKE) -C ./install install
 
 uninstall:
-	$(MAKE) -C ./install uninstall
+	rm -f $(LIB)/libopenDSU.so
+	rm -f $(BIN)/openDSU
+
 
 test:
 	$(MAKE) -C ./tests test
 
-clean:
-	rm -f libopenDSU.so
-	rm -f openDSU
+
+clean: uninstall
 	$(MAKE) -C ./tests clean
+	$(MAKE) -C ./src clean
+	
+
+
 
