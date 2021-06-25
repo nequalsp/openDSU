@@ -4,7 +4,11 @@
 #include "core.h"
 
 
+
+
 int dsu_write_fd(int fd, int sendfd, int port) {
+	/* 	Write file descriptor on the stream pipe. Integer with port number/ error is also send in the
+		Message diagram. Used from the book: "Unix Network Programming from W.Richard Stevens." */
     
     int32_t nport = htonl(port);
     char *ptr = (char*) &nport;
@@ -13,12 +17,11 @@ int dsu_write_fd(int fd, int sendfd, int port) {
 	struct msghdr msg;
 	struct iovec iov[1];
     
-    /* Check whether the socket is valid. TO HANDLE ERROR*/
+    /* Check whether the socket is valid. */
     int error; socklen_t len; 
     if (getsockopt(sendfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0) {
-        perror("DSU \"dsu_write_fd() not a fd not a socket\":");
-        exit(EXIT_FAILURE);
-    }
+        return -1;
+	}
     
 	#ifdef  HAVE_MSGHDR_MSG_CONTROL
 	union {
@@ -53,7 +56,8 @@ int dsu_write_fd(int fd, int sendfd, int port) {
 
 
 int dsu_read_fd(int fd, int *recvfd, int *port) {
-    
+    /* 	Recieve file descriptor on the stream pipe. Integer with port number is also read from the
+		Message diagram. Used from the book: "Unix Network Programming from W.Richard Stevens." */
     int32_t nport;
     char *ptr = (char*)&nport;
     int nbytes = sizeof(nport);

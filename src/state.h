@@ -17,30 +17,30 @@
 
 
 /*  Linked list for sockets for communication between different versions. */
-struct dsu_comfd_struct {
-	
+struct dsu_fd_list {
 
     int fd;
 
-
-    struct dsu_comfd_struct *next;
+    struct dsu_fd_list *next;
 
 
 };
 
 
-/*  Linked list for sockets that are bind to port the application. */
-struct dsu_socket_struct {
+/*  Linked list for shadow datastructures of the file descriptors. */
+struct dsu_socket_list {
     
 
 	int fd;
+	struct dsu_fd_list *fds;
     int shadowfd;
     int port;
     
 
-    /*  Communication. */
+    /*  Linked list with accepted connections used for communication
+		between different versions. */
     struct sockaddr_un comfd_addr;
-	struct dsu_comfd_struct *comfds;
+	struct dsu_fd_list *comfds;
     int comfd;
     
 
@@ -56,7 +56,7 @@ struct dsu_socket_struct {
     int *status;
 
 
-	struct dsu_socket_struct *next;
+	struct dsu_socket_list *next;
 
 	
 };
@@ -71,9 +71,9 @@ struct dsu_state_struct {
 
 
     /* Binded ports of the application. */
-    struct dsu_socket_struct *sockets;
-	struct dsu_socket_struct *binds;
-    int accepted;
+    struct dsu_socket_list *sockets;
+	struct dsu_socket_list *binds;
+    //int accepted;
 
 	
 	/* Termination information. */
@@ -85,38 +85,41 @@ struct dsu_state_struct {
 };
 
 
-#define dsu_forall_sockets(x, y, ...) { struct dsu_socket_struct *dsu_socket_loop = x;\
+#define dsu_forall_sockets(x, y, ...) { struct dsu_socket_list *dsu_socket_loop = x;\
                                         while (dsu_socket_loop != NULL) {\
                                             (*y)(dsu_socket_loop, ## __VA_ARGS__);\
                                             dsu_socket_loop = dsu_socket_loop->next;\
                                         }\
                                       }
 
+/*	Initialize shadow data structure of socket. */
+void dsu_socket_list_init(struct dsu_socket_list *dsu_socket);
 
-struct dsu_socket_struct *dsu_sockets_add(struct dsu_socket_struct **head, struct dsu_socket_struct *new_node);
+/* 	Add file descriptor to list. */
+struct dsu_socket_list *dsu_sockets_add(struct dsu_socket_list **head, struct dsu_socket_list *new_node);
 
+/* 	Remove file descriptor to list. */
+void dsu_sockets_remove_fd(struct dsu_socket_list **head, int sockfd);
 
-void dsu_sockets_remove_fd(struct dsu_socket_struct **head, int sockfd);
+/* 	Transfer file descriptor to different list. */
+struct dsu_socket_list *dsu_sockets_transfer_fd(struct dsu_socket_list **dest, struct dsu_socket_list **src, struct dsu_socket_list *dsu_socketfd);
 
+/* 	Search for shadow datastructure based on file descriptor. */
+struct dsu_socket_list *dsu_sockets_search_fd(struct dsu_socket_list *head, int sockfd);
 
-struct dsu_socket_struct *dsu_sockets_transfer_fd(struct dsu_socket_struct **dest, struct dsu_socket_struct **src, struct dsu_socket_struct *dsu_socketfd);
+/*	Search for shadow datastructure based on port. */
+struct dsu_socket_list *dsu_sockets_search_port(struct dsu_socket_list *head, int port);
 
+/* 	Add open "internal" connection to the shadow data structure. */
+void dsu_socket_add_fds(struct dsu_socket_list *node, int comfd, int flag);
 
-struct dsu_socket_struct *dsu_sockets_search_fd(struct dsu_socket_struct *head, int sockfd);
+/* 	Remove open "internal" connection from the shadow data structure, after close. */
+void dsu_socket_remove_fds(struct dsu_socket_list *node, int comfd, int flag);
 
+/*	Search for shadow datastructure based on "internal" connection. */
+struct dsu_socket_list *dsu_sockets_search_fds(struct dsu_socket_list *node, int sockfd, int flag);
 
-struct dsu_socket_struct *dsu_sockets_search_port(struct dsu_socket_struct *head, int port);
-
-
-void dsu_socket_add_comfd(struct dsu_socket_struct *head, int comfd);
-
-
-void dsu_socket_remove_comfd(struct dsu_socket_struct *head, int comfd);
-
-
-struct dsu_socket_struct *dsu_sockets_search_comfd(struct dsu_socket_struct *head, int sockfd, int flag);
-
-
+/*	Switch user level file descriptor to shadow file descriptor (possible inhirited). */
 int dsu_shadowfd(int sockfd);
 
 

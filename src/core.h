@@ -35,8 +35,12 @@
 #define DSU_LOCKED 1
 
 
-#define DSU_MONITOR 0
-#define DSU_NONMONITOR 1
+#define DSU_NON_INTERNAL_FD 0
+#define DSU_INTERNAL_FD 1
+#define DSU_MONITOR_FD 2
+
+//#define DSU_MONITOR 0
+//#define DSU_NONMONITOR 1
 
 
 #define DSU_COMM "dsu_com"
@@ -51,11 +55,11 @@
 extern struct dsu_state_struct dsu_program_state;
 
 
-int dsu_request_fd(struct dsu_socket_struct *dsu_sockfd);
+int dsu_request_fd(struct dsu_socket_list *dsu_sockfd);
 int dsu_termination_detection();
 void dsu_terminate();
-int dsu_monitor_init(struct dsu_socket_struct *dsu_sockfd);
-void dsu_monitor_fd(struct dsu_socket_struct *dsu_sockfd);
+int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd);
+void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd);
 
 
 int (*dsu_socket)(int, int, int);

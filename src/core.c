@@ -32,10 +32,14 @@
 #include "event_handlers/select.h"
 
 
-/* Global sftruncatetate variable */
+/* 	Global variable containing pointers to the used data structures and state of the program. Every binded file descriptor
+	will be connected to a shadow data structure including file descriptor for communication between versions, state
+	management and shadow file descriptor if it is inherited from previous version. */
 struct dsu_state_struct dsu_program_state;
 
 
+/* 	For the functions socket(), bind(), listen(), accept(), accept4() and close() a wrapper is 
+	created to maintain shadow data structures of the file descriptors. */
 int (*dsu_socket)(int, int, int);
 int (*dsu_bind)(int, const struct sockaddr *, socklen_t);
 int (*dsu_listen)(int, int);
@@ -44,22 +48,22 @@ int (*dsu_accept4)(int, struct sockaddr *restrict, socklen_t *restrict, int);
 int (*dsu_close)(int);
 
 
-int dsu_request_fd(struct dsu_socket_struct *dsu_sockfd) {
-	DSU_DEBUG_PRINT(" - Request fd %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid()); 
+int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
+	DSU_DEBUG_PRINT(" - Inherit fd %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
+	/*	Connect to the previous version, based on named unix domain socket, and receive the file descriptor that is 
+		binded to the same port. Also, receive the file descriptor of the named unix domain socket so internal
+		communication can be taken over when the update completes. */
 
 
-	DSU_DEBUG_PRINT("  - Connect on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid()); 
-    /*  An older version of the program is running, connect to this application over Unix domain socket. */
+	DSU_DEBUG_PRINT("  - Connect on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
     if ( connect(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, sizeof(dsu_sockfd->comfd_addr)) != -1) {
         
 		
-        DSU_DEBUG_PRINT("  - Send on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());           
-        /*  Ask the running program for the file descriptor of corresponding port. */
+        DSU_DEBUG_PRINT("  - Send on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
         if ( send(dsu_sockfd->comfd, &dsu_sockfd->port, sizeof(dsu_sockfd->port), 0) > 0) {
 
 
             DSU_DEBUG_PRINT("  - Recieve on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-            /*  Recieve file descriptor from running version version. */
             int port = 0; int _comfd = 0;
             dsu_read_fd(dsu_sockfd->comfd, &dsu_sockfd->shadowfd, &port);
 			dsu_read_fd(dsu_sockfd->comfd, &_comfd, &port);
@@ -79,18 +83,22 @@ int dsu_request_fd(struct dsu_socket_struct *dsu_sockfd) {
 
 
 int dsu_termination_detection() {
+	/*	Determine based on the global programming state whether it is possible to terminate. A version cannot terminate if:
+		1.	One socket did not increase version.
+		2.	A socket is still actively monitored.
+		3.	The singlely linked list comfds still contains open connections between different versions.
+		4.	Existes of open connections with one or more clients. */
 	
 	DSU_DEBUG_PRINT(" - Termination detection (%d-%d)\n", (int) getpid(), (int) gettid());
 	
-	struct dsu_socket_struct *current = dsu_program_state.binds;
+	struct dsu_socket_list *current = dsu_program_state.binds;
 
 	while (current != NULL) {
 
 		if (	current->version >= current->status[DSU_VERSION]
-			|| 	current->monitoring != 0 
-			|| 	current->status[DSU_PGID] == getpgid(getpid())
+			|| 	current->monitoring != 0
 			||  current->comfds != NULL
-			||	dsu_program_state.accepted > 0
+			||	current->fds != NULL
 			 )
 			return 0;
 
@@ -104,9 +112,14 @@ int dsu_termination_detection() {
 
 
 void dsu_terminate() {
-	DSU_DEBUG_PRINT(" - Exit (%d-%d)\n", (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT(" - Termination (%d-%d)\n", (int) getpid(), (int) gettid());
+	/*	Different models, such as master-worker model, are used to horizontally scale the application. This
+		can either be done with threads or processes. As threads are implemented as processes on linux, 
+		there is not difference in termination. The number of active workers is tracked in the event handler. 
+		The last active worker that terminates, terminates the group to ensure the full application stops. */
 	
-	int final = 0;
+
+	int final = 0; 	//	Ensure program lock is released first, because it is shared with the new version. 
 	
 	
 	DSU_DEBUG_PRINT(" - Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
@@ -122,18 +135,21 @@ void dsu_terminate() {
 	sem_post(dsu_program_state.lock);
 
 
-	if (final && killpg(getpgid(getpid()), SIGKILL)!=-1)
-		pause();
+	if (final) killpg(getpgid(getpid()), SIGKILL);
+	
 	
     exit(EXIT_SUCCESS);     
 
 }    
 			
 
-int dsu_monitor_init(struct dsu_socket_struct *dsu_sockfd) {	
-	
-	/*  Bind() and listen() are thread safe. Only one process or thread will be able to reserve the port. */
-    DSU_DEBUG_PRINT(" - Try initialize communication on  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
+	DSU_DEBUG_PRINT(" - (Try) initialize communication on  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+	/*  This function is called when the program calls bind(). If bind fails, in normal situation, a older version exists. If 
+		bind succees, start listening on the named unix domain file descriptor for connection request of newer versions. It might 
+		happen fork or pthreads are used to accept connections on multiple processes and multi threads respectively. Therefore set 
+		the socket to non-blocking to be able to accept connection requests without risk of indefinetely blocking. */
+    
     if (dsu_bind(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t) sizeof(dsu_sockfd->comfd_addr)) == 0) {
         
         if (dsu_listen(dsu_sockfd->comfd, MAXNUMOFPROC) == 0) {
@@ -153,7 +169,7 @@ int dsu_monitor_init(struct dsu_socket_struct *dsu_sockfd) {
 }
 
 
-void dsu_monitor_fd(struct dsu_socket_struct *dsu_sockfd) {
+void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 	
 	DSU_DEBUG_PRINT(" - Monitor on %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 
@@ -191,22 +207,6 @@ void dsu_monitor_fd(struct dsu_socket_struct *dsu_sockfd) {
 }
 
 
-void dsu_socket_struct_init(struct dsu_socket_struct *dsu_socket) {
-    
-	dsu_socket->port        = 0;
-    dsu_socket->fd      	= 0;
-    dsu_socket->shadowfd    = 0;
-    dsu_socket->comfd       = 0;
-    dsu_socket->comfds      = NULL;
-	dsu_socket->status      = NULL;
-	dsu_socket->monitoring	= 0;
-	dsu_socket->status_sem	= 0;
-	dsu_socket->fd_sem		= 0;	
-	dsu_socket->locked		= 0;
-
-}
-
-
 static __attribute__((constructor)) void dsu_init() {
 
 	
@@ -225,7 +225,6 @@ static __attribute__((constructor)) void dsu_init() {
 
     dsu_program_state.sockets = NULL;
     dsu_program_state.binds = NULL;
-    dsu_program_state.accepted = 0;
 
 	
 	dsu_program_state.live = 0;
@@ -285,8 +284,8 @@ int socket(int domain, int type, int protocol) {
     int sockfd = dsu_socket(domain, type, protocol);
     if (sockfd > 0) {
         /* After successfull creation, add socket to the DSU state. */
-        struct dsu_socket_struct dsu_socket;
-        dsu_socket_struct_init(&dsu_socket);
+        struct dsu_socket_list dsu_socket;
+        dsu_socket_list_init(&dsu_socket);
         dsu_socket.shadowfd = dsu_socket.fd = sockfd;
         dsu_sockets_add(&dsu_program_state.sockets, &dsu_socket);
     }
@@ -302,7 +301,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         that is ready to accept requests. */
     
     /* Find the metadata of sockfd, and transfer the socket to the state binds. */
-    struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd); 
+    struct dsu_socket_list *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd); 
     if (dsu_socketfd == NULL) {
         /*  The socket was not correctly captured in the socket() call. Therefore, we need to return
             error that socket is not correct. On error, -1 is returned, and errno is set to indicate 
@@ -336,18 +335,13 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     char pathname[pathname_size+1];
     sprintf(pathname, "/%s_%d", DSU_COMM, dsu_socketfd->port);
 	int shfd = shm_open(pathname, O_CREAT | O_RDWR , O_RDWR);
-	if (shfd == -1)
+	if (shfd == -1)			// TO DO cleanup here.
 		perror("DSU");
   	if (ftruncate(shfd, 3*sizeof(int)) == -1)
 	 	perror("DSU");
 	dsu_socketfd->status = (int *) mmap(NULL, 3*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
 	if (dsu_socketfd->status == (void *) -1)
 		perror("DSU");
-
-
-	//key_t status_key = ftok(pathname, 1);
-    //int shmid = shmget(status_key, 3*sizeof(int), 0666|IPC_CREAT);
-    //dsu_socketfd->status = (int *) shmat(shmid, NULL, 0);
 
 	
 	/*  During the transition a lock is needed when the accepting file descriptor is blocking. */
@@ -368,7 +362,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 		
         if ( errno == EADDRINUSE ) {
 
-            if (dsu_request_fd(dsu_socketfd) > 0) {
+            if (dsu_inherit_fd(dsu_socketfd) > 0) {
                 
 				dsu_socketfd->monitoring = 1; // Communication file descriptor is inherited.
 				
@@ -427,7 +421,7 @@ int listen(int sockfd, int backlog) {
     /*  listen() marks the socket referred to by sockfd as a passive socket, that is, as a socket that will be
         used to accept incoming connection requests using accept(). */
     
-    struct dsu_socket_struct *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
+    struct dsu_socket_list *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
     
     /*  The file descriptor is not inherited. */
     if (dsu_socketfd == NULL || dsu_socketfd->monitoring == 1) {
@@ -455,7 +449,10 @@ int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrl
 	
     DSU_DEBUG_PRINT(" - accept %d (%d-%d)\n", sessionfd, (int) getpid(), (int) gettid());
     
-	++dsu_program_state.accepted;
+	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
+	
+	if (dsu_sockfd != NULL)
+		dsu_socket_add_fds(dsu_sockfd, sessionfd, DSU_NON_INTERNAL_FD);
 	
     return sessionfd;    
 }
@@ -473,7 +470,10 @@ int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addr
     
     DSU_DEBUG_PRINT(" - accept %d (%d-%d)\n", sessionfd, (int) getpid(), (int) gettid());
     
-	++dsu_program_state.accepted;
+	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
+	
+	if (dsu_sockfd != NULL)
+		dsu_socket_add_fds(dsu_sockfd, sessionfd, DSU_NON_INTERNAL_FD);
     
     return sessionfd;   
 }
@@ -489,35 +489,44 @@ int close(int sockfd) {
     }
 	
 	
-	/* 	Keep consistent state of the sockets. */
-	struct dsu_socket_struct * dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd);
+	struct dsu_socket_list * dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd);
     if (dsu_socketfd != NULL) {
+		DSU_DEBUG_PRINT(" - Unbinded socket (%d-%d)\n", (int) getpid(), (int) gettid());
 		dsu_sockets_remove_fd(&dsu_program_state.sockets, sockfd);
 		return dsu_close(sockfd);
 	}
+
+
 	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
 	if (dsu_socketfd != NULL) {
+		DSU_DEBUG_PRINT(" - Binded socket (%d-%d)\n", (int) getpid(), (int) gettid());
 		dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
 		return dsu_close(sockfd);
 	}
 	
 	
-	/*	Handle close on internal file descriptors. */
-	dsu_socketfd = dsu_sockets_search_comfd(dsu_program_state.binds, sockfd, DSU_MONITOR);
+	dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_MONITOR_FD);
 	if (dsu_socketfd != NULL) {
+		DSU_DEBUG_PRINT(" - Internal master socket (%d-%d)\n", (int) getpid(), (int) gettid());
 		dsu_socketfd->monitoring = 0;
 		return dsu_close(sockfd);
 	}
+
 	
-	dsu_socketfd = dsu_sockets_search_comfd(dsu_program_state.binds, sockfd, DSU_NONMONITOR);
+	dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_INTERNAL_FD);
 	if (dsu_socketfd != NULL) {
-		dsu_socket_remove_comfd(dsu_socketfd, sockfd);
+		DSU_DEBUG_PRINT(" - Internal client socket (%d-%d)\n", (int) getpid(), (int) gettid());
+		dsu_socket_remove_fds(dsu_socketfd, sockfd, DSU_INTERNAL_FD);
 		return dsu_close(sockfd);
 	}
-	
 
-	/* Normal connection is closed. */
-	--dsu_program_state.accepted;
+
+	dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_NON_INTERNAL_FD);
+	if (dsu_socketfd != NULL) {
+		DSU_DEBUG_PRINT(" - Client socket (%d-%d)\n", (int) getpid(), (int) gettid());
+		dsu_socket_remove_fds(dsu_socketfd, sockfd, DSU_NON_INTERNAL_FD);
+		return dsu_close(sockfd);
+	}
 
 
 	return dsu_close(sockfd);

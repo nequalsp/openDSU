@@ -15,7 +15,7 @@
 int (*dsu_select)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 
 
-void dsu_sniff_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
+void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Listen under the hood to accepted connections on public socket. A new generation can request
         file descriptors. During DUAL listening, only one  */
     
@@ -28,7 +28,7 @@ void dsu_sniff_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
 	
     
 	/* Contains zero or more accepted connections. */
-	struct dsu_comfd_struct *comfds = dsu_sockfd->comfds;   
+	struct dsu_fd_list *comfds = dsu_sockfd->comfds;   
 	
 	while (comfds != NULL) {
 
@@ -41,7 +41,7 @@ void dsu_sniff_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
 }
 
 
-void dsu_handle_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
+void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	
     DSU_DEBUG_PRINT(" - Handle on %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 	
@@ -56,7 +56,7 @@ void dsu_handle_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
 			
 			if ( acc != -1) {
 			    DSU_DEBUG_PRINT("  - Accept %d on %d (%d-%d)\n", acc, dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-			    dsu_socket_add_comfd(dsu_sockfd, acc);
+			    dsu_socket_add_fds(dsu_sockfd, acc, DSU_INTERNAL_FD);
 			} else
 				DSU_DEBUG_PRINT("  - Accept failed (%d-%d)\n", (int) getpid(), (int) gettid());
 			
@@ -67,7 +67,7 @@ void dsu_handle_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
 	}
 	
 
-    struct dsu_comfd_struct *comfds =   dsu_sockfd->comfds;   
+    struct dsu_fd_list *comfds =   dsu_sockfd->comfds;   
    	
     while (comfds != NULL) {
     
@@ -89,9 +89,9 @@ void dsu_handle_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
                 dsu_close(comfds->fd);
                 FD_CLR(comfds->fd, readfds);
                 
-                struct dsu_comfd_struct *_comfds = comfds;
+                struct dsu_fd_list *_comfds = comfds;
                 comfds = comfds->next;
-                dsu_socket_remove_comfd(dsu_sockfd, _comfds->fd);
+                dsu_socket_remove_fds(dsu_sockfd, _comfds->fd, DSU_INTERNAL_FD);
                 
                 continue;
             } 
@@ -135,7 +135,7 @@ void dsu_handle_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
 }
 
 
-void dsu_pre_select(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
+void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Change socket file descripter to its shadow file descriptor. */   
    	
 	
@@ -176,7 +176,7 @@ void dsu_pre_select(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
 }
 
 
-void dsu_post_select(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
+void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Change shadow file descripter to its original file descriptor. */
     
     if (dsu_sockfd->locked == DSU_LOCKED) {
