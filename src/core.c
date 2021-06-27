@@ -63,11 +63,11 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
         if ( send(dsu_sockfd->comfd, &dsu_sockfd->port, sizeof(dsu_sockfd->port), 0) > 0) {
 
 
-            DSU_DEBUG_PRINT("  - Recieve on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
+            DSU_DEBUG_PRINT("  - Receive on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
             int port = 0; int _comfd = 0;
             dsu_read_fd(dsu_sockfd->comfd, &dsu_sockfd->shadowfd, &port);
 			dsu_read_fd(dsu_sockfd->comfd, &_comfd, &port);
-			
+			DSU_DEBUG_PRINT("  - Received %d (%d-%d)\n", dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
 
 			dsu_close(dsu_sockfd->comfd);
 			dsu_sockfd->comfd = _comfd;
@@ -86,8 +86,8 @@ int dsu_termination_detection() {
 	/*	Determine based on the global programming state whether it is possible to terminate. A version cannot terminate if:
 		1.	One socket did not increase version.
 		2.	A socket is still actively monitored.
-		3.	The singlely linked list comfds still contains open connections between different versions.
-		4.	Existes of open connections with one or more clients. */
+		3.	The singlely linked list comdfd still contains open connections between different versions.
+		4.	The singlely linked list fds still contains open connections with clients. */
 	
 	DSU_DEBUG_PRINT(" - Termination detection (%d-%d)\n", (int) getpid(), (int) gettid());
 	
@@ -119,7 +119,7 @@ void dsu_terminate() {
 		The last active worker that terminates, terminates the group to ensure the full application stops. */
 	
 
-	int final = 0; 	//	Ensure program lock is released first, because it is shared with the new version. 
+	//int final = 0; 	//	Ensure program lock is released first, because it is shared with the new version. 
 	
 	
 	DSU_DEBUG_PRINT(" - Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
@@ -128,17 +128,18 @@ void dsu_terminate() {
 	
 	if (--dsu_program_state.workers[0] == 0) {
 		DSU_DEBUG_PRINT("  - All (%d-%d)\n", (int) getpid(), (int) gettid());
-		final = 1;
+		//final = 1;
 	}
 	
 	DSU_DEBUG_PRINT(" - Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
 	sem_post(dsu_program_state.lock);
 
 
-	if (final) killpg(getpgid(getpid()), SIGKILL);
+	pause();
+	//if (final) killpg(getpgid(getpid()), SIGKILL);
 	
 	
-    exit(EXIT_SUCCESS);     
+    //exit(EXIT_SUCCESS);     
 
 }    
 			
@@ -170,17 +171,19 @@ int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
 
 
 void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
-	
 	DSU_DEBUG_PRINT(" - Monitor on %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+	/*	Act on the state, in shared memory, accourding to the flow. If processes noticed that the verison of a file descriptor
+		increased, it could stop listening on this file descriptor. When its version is higher than the current version, update 
+		the version (this is done after starting to listen on the socket). Because shared memory is updates, lock is required.  */
 
 	
 	DSU_DEBUG_PRINT("  - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 	sem_wait(dsu_sockfd->status_sem);
 
-			
-	/*	Quit monitoring by older generation. */
+
 	if (	dsu_sockfd->version < dsu_sockfd->status[DSU_VERSION] 
-		&&	dsu_sockfd->monitoring 
+		&&	dsu_sockfd->monitoring
+		&&	!dsu_sockfd->locked
 	) {
 		
 		DSU_DEBUG_PRINT("  - Quit monitoring  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
@@ -191,8 +194,8 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 	}
 
 
-	/*	Takeover monitoring from older generation. */
-	if (dsu_sockfd->version > dsu_sockfd->status[DSU_VERSION]) {
+	if (	dsu_sockfd->version > dsu_sockfd->status[DSU_VERSION]
+		&&	dsu_sockfd->monitoring) {
 		
 		DSU_DEBUG_PRINT("  - Increase version  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());				
 		dsu_sockfd->status[DSU_PGID] = getpgid(getpid());
@@ -208,7 +211,7 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 
 
 static __attribute__((constructor)) void dsu_init() {
-
+	/*	LD_Preload constructor is called before the binary starts. Initialze the program state. */
 	
 	#if DSU_DEBUG == 1
     int size = snprintf(NULL, 0, "%s_%d.log", DSU_LOG, (int) getpid());
@@ -216,7 +219,7 @@ static __attribute__((constructor)) void dsu_init() {
 	sprintf(logfile, "%s_%d.log", DSU_LOG, (int) getpid());
 	dsu_program_state.logfd = fopen(logfile, "w");
 	if (dsu_program_state.logfd == NULL) {
-		perror("DSU \" Error opening debugging file\":");
+		perror("DSU \"Error opening debugging file\"");
 		exit(EXIT_FAILURE);
 	}
 	#endif
@@ -227,26 +230,35 @@ static __attribute__((constructor)) void dsu_init() {
     dsu_program_state.binds = NULL;
 
 	
+	dsu_program_state.add = 0;
+
+		
 	dsu_program_state.live = 0;
 	
 	
-	/*  */
+	/* 	Create shared memory, to trace number of active worker processes. */
     int pathname_size = snprintf(NULL, 0, "/%s_%d.state", DSU_COMM, (int) getpgid(getpid()));
     char pathname[pathname_size+1];
     sprintf(pathname, "/%s_%d.state", DSU_COMM, (int) getpgid(getpid()));
 	shm_unlink(pathname);
 	int shfd = shm_open(pathname, O_CREAT | O_RDWR | O_TRUNC, O_RDWR);
-	if (shfd == -1)
-		perror("DSU");
-  	if (ftruncate(shfd, sizeof(int)) == -1)
-	 	perror("DSU");
+	if (shfd == -1) {
+		perror("DSU \"Error creating shared memory\"");
+		exit(EXIT_FAILURE);
+	}
+  	if (ftruncate(shfd, sizeof(int)) == -1) {
+	 	perror("DSU \"Error creating shared memory\"");
+		exit(EXIT_FAILURE);
+	}
 	dsu_program_state.workers = (int *) mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
-	if (dsu_program_state.workers == (void *) -1)
-		perror("DSU");
+	if (dsu_program_state.workers == (void *) -1) {
+		perror("DSU \"Error creating shared memory\"");
+		exit(EXIT_FAILURE);
+	}
 	dsu_program_state.workers[0] = 0;	// Initialize.
 
 
-	/*   */
+	/*	Create semaphore in shared memory to avoid race conditions during modifications. */
     int pathname_size_sem = snprintf(NULL, 0, "/%s_%d.lock", DSU_COMM, (int) getpgid(getpid()));
     char pathname_sem[pathname_size_sem+1];
     sprintf(pathname_sem, "/%s_%d.lock", DSU_COMM, (int) getpgid(getpid()));
@@ -335,13 +347,19 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     char pathname[pathname_size+1];
     sprintf(pathname, "/%s_%d", DSU_COMM, dsu_socketfd->port);
 	int shfd = shm_open(pathname, O_CREAT | O_RDWR , O_RDWR);
-	if (shfd == -1)			// TO DO cleanup here.
-		perror("DSU");
-  	if (ftruncate(shfd, 3*sizeof(int)) == -1)
-	 	perror("DSU");
+	if (shfd == -1) {
+		perror("DSU \"Error creating shared memory\"");
+		exit(EXIT_FAILURE);
+	}
+  	if (ftruncate(shfd, 3*sizeof(int)) == -1) {
+	 	perror("DSU \"Error creating shared memory\"");
+		exit(EXIT_FAILURE);
+	}
 	dsu_socketfd->status = (int *) mmap(NULL, 3*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
-	if (dsu_socketfd->status == (void *) -1)
-		perror("DSU");
+	if (dsu_socketfd->status == (void *) -1) {
+		perror("DSU \"Error creating shared memory\"");
+		exit(EXIT_FAILURE);
+	}
 
 	
 	/*  During the transition a lock is needed when the accepting file descriptor is blocking. */
@@ -386,6 +404,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         }
     }
     
+	/*	No other version running. */
 		 	
 	sem_unlink(pathname_status_sem); // Semaphore does not terminate after exit.
     dsu_socketfd->status_sem = sem_open(pathname_status_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
@@ -409,6 +428,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 		sem_post(dsu_socketfd->status_sem);
 	}
 	
+	
     dsu_sockets_transfer_fd(&dsu_program_state.binds, &dsu_program_state.sockets, dsu_socketfd);
   	
     
@@ -424,9 +444,9 @@ int listen(int sockfd, int backlog) {
     struct dsu_socket_list *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
     
     /*  The file descriptor is not inherited. */
-    if (dsu_socketfd == NULL || dsu_socketfd->monitoring == 1) {
+    if (dsu_socketfd == NULL || dsu_socketfd->monitoring == 1)
         return dsu_listen(sockfd, sockfd);
-    }
+
     
     /*  The socket is recieved from the older generation and listen() does not need to be called. */
 	DSU_DEBUG_PRINT(" - Shadow fd: %d (%d-%d)\n", dsu_socketfd->shadowfd, (int) getpid(), (int) gettid());
@@ -481,8 +501,14 @@ int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addr
 
 int close(int sockfd) {
 	DSU_DEBUG_PRINT("Close() (%d-%d)\n", (int) getpid(), (int) gettid());
+	/*	close() closes a file descriptor, so that it no longer refers to any file and may be reused. Therefore, the the shadow file descriptor
+		should also be removed / closed. The file descriptor can exist in:
+			1.	Unbinded sockets 	-> 	dsu_program_State.sockets
+			2.	Binded sockets 		-> 	dsu_program_State.binds
+			3.	Internal sockets	-> 	dsu_program_State.binds->comfd | dsu_program_State.binds->fds
+			4.	Connected clients	-> 	dsu_program_state.accepted	*/
 	
-	
+		
 	/* 	Return immediately for these file descriptors. */
     if (sockfd == STDIN_FILENO || sockfd == STDOUT_FILENO || sockfd == STDERR_FILENO) {
         return dsu_close(sockfd);
@@ -499,9 +525,10 @@ int close(int sockfd) {
 
 	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
 	if (dsu_socketfd != NULL) {
-		DSU_DEBUG_PRINT(" - Binded socket (%d-%d)\n", (int) getpid(), (int) gettid());
-		dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
-		return dsu_close(sockfd);
+		DSU_DEBUG_PRINT(" - Binded socket %d=%d (%d-%d)\n",dsu_socketfd->fd, dsu_socketfd->shadowfd, (int) getpid(), (int) gettid());
+		//dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
+		//return dsu_close(sockfd);
+		return 0;
 	}
 	
 	

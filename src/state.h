@@ -32,7 +32,7 @@ struct dsu_socket_list {
     
 
 	int fd;
-	struct dsu_fd_list *fds;
+	struct dsu_fd_list *fds;		// Accepted connections.
     int shadowfd;
     int port;
     
@@ -40,9 +40,9 @@ struct dsu_socket_list {
     /*  Linked list with accepted connections used for communication
 		between different versions. */
     struct sockaddr_un comfd_addr;
-	struct dsu_fd_list *comfds;
-    int comfd;
-    
+	struct dsu_fd_list *comfds;		// File descriptors of acccepted internal connections.
+    int comfd;						// File descriptor for listening for internal connections.
+	
 
     /*  Status. */
 	int monitoring;
@@ -73,7 +73,10 @@ struct dsu_state_struct {
     /* Binded ports of the application. */
     struct dsu_socket_list *sockets;
 	struct dsu_socket_list *binds;
-    //int accepted;
+    
+	
+	/* 	Number of Sniffing. */	
+	int add;
 
 	
 	/* Termination information. */

@@ -34,7 +34,7 @@ void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 
 	    DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", comfds->fd, (int) getpid(), (int) gettid());
 	    FD_SET(comfds->fd, readfds);
-
+		
 	    comfds = comfds->next;        
 	}
 	
@@ -49,6 +49,8 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
         accepting dsu communication connection. */
 	if (FD_ISSET(dsu_sockfd->comfd, readfds)) {
 		
+		++dsu_program_state.add;
+	
 		if (dsu_sockfd->monitoring) {
 				    
 			int size = sizeof(dsu_sockfd->comfd_addr);
@@ -72,6 +74,8 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     while (comfds != NULL) {
     
         if (FD_ISSET(comfds->fd, readfds)) {
+
+			++dsu_program_state.add;
             
             int buffer = 0;
             int port = dsu_sockfd->port;
@@ -149,7 +153,7 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 			sem_wait(dsu_sockfd->status_sem);
 			
-			if (dsu_sockfd->status[DSU_TRANSFER]) {
+			if (dsu_sockfd->status[DSU_TRANSFER] == -1) {
 				
 				DSU_DEBUG_PRINT(" - Try lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 				if (sem_trywait(dsu_sockfd->fd_sem) == 0) {
@@ -178,7 +182,7 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 
 void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Change shadow file descripter to its original file descriptor. */
-    
+
     if (dsu_sockfd->locked == DSU_LOCKED) {
         DSU_DEBUG_PRINT(" - Unlock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
         sem_post(dsu_sockfd->fd_sem);
@@ -210,7 +214,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	#endif
 
 	
-	/*   */
+	/* 	Mark process as worker.  */
 	if (!dsu_program_state.live) {
 		dsu_program_state.live = 1;
 		sem_wait(dsu_program_state.lock);
@@ -234,10 +238,10 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
     dsu_forall_sockets(dsu_program_state.binds, dsu_sniff_conn, readfds);
 
     
-    struct timeval tv = {2, 0};
-    if (timeout != NULL) {
-        tv = *timeout;
-    }
+    //struct timeval tv = {2, 0};
+    //if (timeout != NULL) {
+    //    tv = *timeout;
+    //}
     
 
 	#if DSU_DEBUG == 1
@@ -248,7 +252,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	#endif
 
 
-    int result = dsu_select(nfds, readfds, writefds, exceptfds, &tv);
+    int result = dsu_select(nfds, readfds, writefds, exceptfds, NULL);//&tv);
     if (result < 0) return result;
 	
     
@@ -275,5 +279,9 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 		}
 	#endif
     
-	return result;
+	
+	int cor = dsu_program_state.add;
+	DSU_DEBUG_PRINT(" - response: %d %d (%d-%d)\n", result, cor, (int) getpid(), (int) gettid());
+	dsu_program_state.add = 0;
+	return result - cor;
 }
