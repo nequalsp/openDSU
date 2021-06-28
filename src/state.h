@@ -75,10 +75,6 @@ struct dsu_state_struct {
 	struct dsu_socket_list *binds;
     
 	
-	/* 	Number of Sniffing. */	
-	int add;
-
-	
 	/* Termination information. */
 	int live;
 	int *workers;

@@ -4,8 +4,6 @@
 #include "core.h"
 
 
-
-
 int dsu_write_fd(int fd, int sendfd, int port) {
 	/* 	Write file descriptor on the stream pipe. Integer with port number/ error is also send in the
 		Message diagram. Used from the book: "Unix Network Programming from W.Richard Stevens." */
@@ -19,7 +17,7 @@ int dsu_write_fd(int fd, int sendfd, int port) {
     
     /* Check whether the socket is valid. */
     int error; socklen_t len; 
-    if (getsockopt(sendfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0) {
+    if (dsu_getsockopt(sendfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0) {
         return -1;
 	}
     
@@ -51,7 +49,7 @@ int dsu_write_fd(int fd, int sendfd, int port) {
 	msg.msg_iov = iov;
 	msg.msg_iovlen = 1;
 
-	return (sendmsg(fd, &msg, 0));
+	return (dsu_sendmsg(fd, &msg, 0));
 }
 
 
@@ -90,7 +88,8 @@ int dsu_read_fd(int fd, int *recvfd, int *port) {
 	msg.msg_iov = iov;
 	msg.msg_iovlen = 1;
 
-	if ( (n = recvmsg(fd, &msg, 0)) <= 0)
+	/* These calls return the number of bytes received, or -1 if an error occurred. The return value will be 0 when the peer has performed an orderly shutdown. */
+	if ( (n = dsu_recvmsg(fd, &msg, 0)) <= 0)
 		return (n);
 
 	#ifdef  HAVE_MSGHDR_MSG_CONTROL
