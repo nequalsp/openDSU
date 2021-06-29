@@ -45,7 +45,7 @@
 
 #define DSU_COMM "dsu_com"
 #define DSU_COMM_LEN 14
-#define MAXNUMOFPROC 5
+#define DSU_MAXNUMOFPROC 5
 
 
 #define DSU_LOG "/var/log/dsu"
