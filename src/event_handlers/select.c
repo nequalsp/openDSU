@@ -127,7 +127,8 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 				DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 				sem_wait(dsu_sockfd->status_sem);
 				DSU_DEBUG_PRINT(" - DSU_TRANSFER %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-				dsu_sockfd->status[DSU_TRANSFER] = 1;
+				/* Possible multiple processes respond to requests. */
+				if (dsu_sockfd->transfer == 0) {++dsu_sockfd->status[DSU_TRANSFER]; dsu_sockfd->transfer = 1;}
 				DSU_DEBUG_PRINT(" - Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 				sem_post(dsu_sockfd->status_sem);
 				
@@ -166,7 +167,7 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			if (sem_wait(dsu_sockfd->status_sem) == 0) {
 			
 
-				if (dsu_sockfd->status[DSU_TRANSFER] == 1) {
+				if (dsu_sockfd->status[DSU_TRANSFER] > 0) {
 					transfer = 1;
 					
 					DSU_DEBUG_PRINT(" - Try lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());

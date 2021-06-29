@@ -233,7 +233,8 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 			DSU_DEBUG_PRINT("  - Quit monitoring  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 			dsu_close(dsu_sockfd->comfd);
 			dsu_sockfd->monitoring = 0;
-			dsu_sockfd->status[DSU_TRANSFER] = 0;
+			--dsu_sockfd->status[DSU_TRANSFER];
+			dsu_sockfd->transfer = 0;
 		
 		}
 
@@ -664,6 +665,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 		dsu_socketfd->status[DSU_PGID] = getpgid(getpid());
 		dsu_socketfd->version = dsu_socketfd->status[DSU_VERSION] = 0;
 		dsu_socketfd->status[DSU_TRANSFER] = 0;
+		dsu_socketfd->transfer = 0;	
 		
 		DSU_DEBUG_PRINT(" - Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
 		sem_post(dsu_socketfd->status_sem);

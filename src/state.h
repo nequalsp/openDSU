@@ -48,6 +48,7 @@ struct dsu_socket_list {
 	int monitoring;
 	int version;
 	int locked;
+	int transfer;
 	
 
 	/* 	Multi- process & threading. */
