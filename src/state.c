@@ -15,6 +15,7 @@ void dsu_socket_list_init(struct dsu_socket_list *dsu_socket) {
 	dsu_socket->fd_sem		= 0;	
 	dsu_socket->locked		= 0;
 	dsu_socket->transfer 	= 0;
+    dsu_socket->blocking 	= 0;    // Conservative.
 
 }
 
@@ -68,6 +69,17 @@ struct dsu_socket_list *dsu_sockets_search_fd(struct dsu_socket_list *head, int 
     
     while (head != NULL) {
         if (head->fd == sockfd) return head;
+        head = head->next;
+    }
+    
+    return NULL;
+}
+
+
+struct dsu_socket_list *dsu_sockets_search_shadowfd(struct dsu_socket_list *head, int sockfd) {
+    
+    while (head != NULL) {
+        if (head->shadowfd == sockfd) return head;
         head = head->next;
     }
     
@@ -180,13 +192,25 @@ struct dsu_socket_list *dsu_sockets_search_fds(struct dsu_socket_list *node, int
 }
 
 
-int dsu_shadowfd(int sockfd) {
+int dsu_shadowfd(int fd) {
     /*  If sockfd is in the list of binded sockets, return the shadowfd. If not in the list, it is not a
         socket that is binded to a port. */
     
-    struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
+    struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, fd);
     if (dsu_sockfd != NULL)
         return dsu_sockfd->shadowfd;
     
-    return sockfd;
+    return fd;
+}
+
+
+int dsu_originalfd(int shadowfd) {
+    /*  If sockfd is in the list of binded sockets, return the shadowfd. If not in the list, it is not a
+        socket that is binded to a port. */
+    
+    struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_shadowfd(dsu_program_state.binds, shadowfd);
+    if (dsu_sockfd != NULL)
+        return dsu_sockfd->fd;
+    
+    return shadowfd;
 }

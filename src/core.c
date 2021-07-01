@@ -159,9 +159,11 @@ void dsu_terminate() {
 		there is not difference in termination. The number of active workers is tracked in the event handler. 
 		The last active worker that terminates, terminates the group to ensure the full application stops. */
 	
+    
 	/* 	In case of error do not terminate all processes. */
 	int workers  = 1;
 	
+    
 	DSU_DEBUG_PRINT(" - Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
 	if (sem_wait(dsu_program_state.lock) == 0) {
 		
@@ -180,7 +182,29 @@ void dsu_terminate() {
 
 	exit(EXIT_SUCCESS);
 
-}    
+}
+
+
+void dsu_activate_process(void) {
+		
+	DSU_DEBUG_PRINT(" - Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+	if( sem_wait(dsu_program_state.lock) == 0) {
+		
+		++dsu_program_state.workers[0];
+
+		DSU_DEBUG_PRINT(" - Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+		sem_post(dsu_program_state.lock);
+	}
+	
+}
+
+
+void dsu_configure_process(void) {
+	
+	dsu_forall_sockets(dsu_program_state.binds, dsu_configure_socket);
+}
+
+
 			
 
 int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
@@ -253,6 +277,23 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 		sem_post(dsu_sockfd->status_sem);
 	
 	}
+}
+
+
+int dsu_is_blocking(int fd) {
+    
+    int flags = fcntl(fd, F_GETFL, 0);
+    if ( (flags & O_NONBLOCK) ) return 0;
+
+    return 1;
+
+}
+
+
+void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd) {
+
+    dsu_sockfd->blocking = dsu_is_blocking(dsu_sockfd->shadowfd);
+    
 }
 
 

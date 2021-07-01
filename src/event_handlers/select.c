@@ -57,18 +57,17 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 		
 		++correction;
 	
-		if (dsu_sockfd->monitoring) {
-				    
-			int size = sizeof(dsu_sockfd->comfd_addr);
-			int acc = dsu_accept4(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size, SOCK_NONBLOCK);
+
+		int size = sizeof(dsu_sockfd->comfd_addr);
+		int acc = dsu_accept4(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size, SOCK_NONBLOCK);
+		
+		
+		if ( acc != -1) {
+		    DSU_DEBUG_PRINT("  - Accept %d on %d (%d-%d)\n", acc, dsu_sockfd->comfd, (int) getpid(), (int) gettid());
+		    dsu_socket_add_fds(dsu_sockfd, acc, DSU_INTERNAL_FD);
+		} else
+			DSU_DEBUG_PRINT("  - Accept failed (%d-%d)\n", (int) getpid(), (int) gettid());
 			
-			if ( acc != -1) {
-			    DSU_DEBUG_PRINT("  - Accept %d on %d (%d-%d)\n", acc, dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-			    dsu_socket_add_fds(dsu_sockfd, acc, DSU_INTERNAL_FD);
-			} else
-				DSU_DEBUG_PRINT("  - Accept failed (%d-%d)\n", (int) getpid(), (int) gettid());
-			
-		}
 		
 		DSU_DEBUG_PRINT(" - remove: %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
 		FD_CLR(dsu_sockfd->comfd, readfds);
@@ -157,6 +156,7 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     if (FD_ISSET(dsu_sockfd->fd, readfds)) {
 		
 		
+		/*  Deactivate original file descriptor. */
 		FD_CLR(dsu_sockfd->fd, readfds);
 
 
@@ -166,10 +166,12 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 			if (sem_wait(dsu_sockfd->status_sem) == 0) {
 			
-
-				if (dsu_sockfd->status[DSU_TRANSFER] > 0) {
-					transfer = 1;
+                if (dsu_sockfd->status[DSU_TRANSFER] > 0) transfer = 1;
+                
+                /*  Only one process can monitor a blocking socket. During transfer use lock. */
+				if (transfer && dsu_sockfd->blocking) {
 					
+                    
 					DSU_DEBUG_PRINT(" - Try lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 					if (sem_trywait(dsu_sockfd->fd_sem) == 0) {
 						
@@ -177,7 +179,8 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 						DSU_DEBUG_PRINT(" - Lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 						dsu_sockfd->locked = DSU_LOCKED;
 
-
+						
+						/*  Set shadow file descriptor. */
 						DSU_DEBUG_PRINT(" - Set %d => %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
 						FD_SET(dsu_sockfd->shadowfd, readfds);
 						if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
@@ -186,8 +189,9 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 
 				
 				} else {
-
-					
+				
+				
+					/*  Set shadow file descriptor. */
 					DSU_DEBUG_PRINT(" - Set %d => %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
 					FD_SET(dsu_sockfd->shadowfd, readfds);
 					if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
@@ -230,18 +234,19 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
         file descriptors to their shadow file descriptors. */
 	
 	
-	/* */
-	fd_set original_readfds;
-	if (readfds != NULL) original_readfds = *readfds;
-
-	fd_set original_writefds;
-	if (writefds != NULL) original_writefds = *writefds;
-
-	fd_set original_exceptfds;
-	if (exceptfds != NULL) original_exceptfds = *exceptfds;
+	/*  Store original file descriptor sets so select can be called recursively when only internal traffic triggers the 
+        select() function. */
+	fd_set original_readfds; if (readfds != NULL) original_readfds = *readfds;
+	fd_set original_writefds; if (writefds != NULL) original_writefds = *writefds;
+    fd_set original_exceptfds; if (exceptfds != NULL) original_exceptfds = *exceptfds;
 
 	
+    /*  It might be necessary to increase the maximum file descriptors that need to be monitored. */
 	max_fds = nfds;
+
+
+    /*  This will be marked to 1 if one of the sockets is transfering a file descriptor, this is used to activate locking
+        and decrease the timeout. */
 	transfer = 0;
 	
 	
@@ -253,29 +258,26 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	#endif
 	
 	
-	/* 	Mark process as worker.  */
-	if (!dsu_program_state.live) {
+	/* 	On first call to select, mark worker active and configure binded sockets. */
+	if (!dsu_program_state.live) {	
 		
-		DSU_DEBUG_PRINT(" - Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-		if( sem_wait(dsu_program_state.lock) == 0) {
-			
-			dsu_program_state.live = 1;
-			
-			++dsu_program_state.workers[0];
-
-			DSU_DEBUG_PRINT(" - Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-			sem_post(dsu_program_state.lock);
-		}
+		dsu_activate_process();
+		dsu_configure_process();
+		
+		/*	Process is initialized. */
+		dsu_program_state.live = 1;
 	}
 	
 
 	/* 	Mark version of the file descriptors. */
 	dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
-
+    
+    
 	if (dsu_termination_detection()) {
 		dsu_terminate();
 	}
 	
+    
     /*  Convert to shadow file descriptors, this must be done for binded sockets. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_pre_select, readfds);
     
@@ -320,12 +322,13 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
     /*  Convert shadow file descriptors back to user level file descriptors to avoid changing the external behaviour. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_post_select, readfds);
 
-   				
+   	
+    /*  Used respond the correct number of file descriptors that triggered the select function. */			
 	int _correction = correction;
 	correction = 0;
 	
 	
-	/* Cannot handle return value of 0 */
+	/* Avoid changing external behaviour. Most applications cannot handle return value of 0, hence call select recursively. */
 	if (result - _correction == 0 && timeout == NULL) {
 		DSU_DEBUG_PRINT(" - Restart Select() (%d-%d)\n", (int) getpid(), (int) gettid());
 

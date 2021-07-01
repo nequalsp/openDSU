@@ -39,9 +39,6 @@
 #define DSU_INTERNAL_FD 1
 #define DSU_MONITOR_FD 2
 
-//#define DSU_MONITOR 0
-//#define DSU_NONMONITOR 1
-
 
 #define DSU_COMM "dsu_com"
 #define DSU_COMM_LEN 14
@@ -60,7 +57,9 @@ int dsu_termination_detection();
 void dsu_terminate();
 int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd);
 void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd);
-
+void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd);
+void dsu_activate_process(void);
+void dsu_configure_process(void);
 
 extern int (*dsu_socket)(int, int, int);
 extern int (*dsu_bind)(int, const struct sockaddr *, socklen_t);
