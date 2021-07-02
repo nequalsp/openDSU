@@ -29,3 +29,5 @@ $(SRC1)/%.o: $(SRC1)/%.c
 clean:
 	rm -f $(OBJS0)
 	rm -f $(OBJS1)
+	rm -rf $(SRC0)/__pycache__/
+	rm -rf $(SRC1)/__pycache__/

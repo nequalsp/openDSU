@@ -13,7 +13,6 @@
 #include <sys/shm.h>
 #include <poll.h>
 
-
 #define PORT    3000
 #define MAXMSG  512
 
@@ -55,12 +54,8 @@ int main (int argc, char **argv) {
 	printf("Start listening on port %d...\n", PORT);
 	while (1)
 	{
-    	//void* libc = dlopen("libc.so.6", RTLD_LAZY);
-    	//original_ioctl = (type_ioctl)dlsym(libc, "ioctl");
-    	//dlclose(libc);
-
-		printf("Start poll()\n");
-        if ( poll(fds, nfds, 500) < 0 ) {
+    
+        if (poll(fds, nfds, 500) < 0) {
           perror("  poll() failed");
           exit(EXIT_FAILURE);
         }
@@ -108,7 +103,7 @@ int main (int argc, char **argv) {
 					compress = 1;
 				} else {
 					/* Write response. */
-					char response[25] = "Hello, this is version 1\0";
+					char response[25] = "Hello, this is version 2\0";
 					if ( write(fds[i].fd, response, sizeof(response)-1) < 0) {
 						/* Read error. */
 						perror("Error writing message");

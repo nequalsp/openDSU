@@ -11,7 +11,6 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <signal.h>
-#include <fcntl.h>          
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/ipc.h>
@@ -23,13 +22,11 @@
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <stdarg.h>
-#include <sys/ioctl.h>
-
+#include <poll.h>
 
 #include "core.h"
 #include "state.h"
 #include "communication.h"
-
 
 #include "event_handlers/select.h"
 #include "event_handlers/poll.h"
@@ -54,12 +51,6 @@ int (*dsu_accept)(int, struct sockaddr *restrict, socklen_t *restrict);
 int (*dsu_accept4)(int, struct sockaddr *restrict, socklen_t *restrict, int);
 int (*dsu_shutdown)(int, int);
 int (*dsu_close)(int);
-//int (*dsu_fcntl)(int, int, char *);//... /* arg */);
-//int (*dsu_ioctl)(int, unsigned long, char *);// ... /* arg */);
-int (*dsu_getsockopt)(int, int, int, void *restrict, socklen_t *restrict);
-int (*dsu_setsockopt)(int, int, int, const void *, socklen_t);
-int (*dsu_getsockname)(int, struct sockaddr *restrict, socklen_t *restrict);
-int (*dsu_getpeername)(int, struct sockaddr *restrict, socklen_t *restrict);
 ssize_t (*dsu_read)(int, void *, size_t);
 ssize_t (*dsu_recv)(int, void *, size_t, int);
 ssize_t (*dsu_recvfrom)(int, void *restrict, size_t, int, struct sockaddr *restrict, socklen_t *restrict);
@@ -126,12 +117,12 @@ int dsu_termination_detection() {
 		/* 	In case of error do not terminate. */
 		int version = current->version;
 		
-		DSU_DEBUG_PRINT("  - Lock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT("  < Lock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
 		if (sem_wait(current->status_sem) == 0) {
 		
 			version = current->status[DSU_VERSION];
 
-			DSU_DEBUG_PRINT("  - Unlock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
+			DSU_DEBUG_PRINT("  > Unlock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
 			sem_post(current->status_sem);
 		}
 
@@ -164,12 +155,12 @@ void dsu_terminate() {
 	int workers  = 1;
 	
     
-	DSU_DEBUG_PRINT(" - Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT(" < Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
 	if (sem_wait(dsu_program_state.lock) == 0) {
 		
 		workers = --dsu_program_state.workers[0];	
 			
-		DSU_DEBUG_PRINT(" - Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT(" > Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
 		sem_post(dsu_program_state.lock);
 	}
 
@@ -187,12 +178,12 @@ void dsu_terminate() {
 
 void dsu_activate_process(void) {
 		
-	DSU_DEBUG_PRINT(" - Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT(" < Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
 	if( sem_wait(dsu_program_state.lock) == 0) {
 		
 		++dsu_program_state.workers[0];
 
-		DSU_DEBUG_PRINT(" - Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT(" > Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
 		sem_post(dsu_program_state.lock);
 	}
 	
@@ -224,7 +215,7 @@ int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
 			fcntl(dsu_sockfd->comfd, F_SETFL, fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK); 
 			
 			
-            DSU_DEBUG_PRINT(" - Initialized communication on  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+            DSU_DEBUG_PRINT(" - Initialized communication on  %d fd: %d (%d-%d)\n", dsu_sockfd->port, dsu_sockfd->comfd, (int) getpid(), (int) gettid());
 
 			
 			return 0;
@@ -245,7 +236,7 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 		the version (this is done after starting to listen on the socket). Because shared memory is updates, lock is required.  */
 
 	
-	DSU_DEBUG_PRINT("  - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT("  < Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 	if (sem_wait(dsu_sockfd->status_sem) == 0) {
 
 
@@ -273,7 +264,7 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 		}
 	
 		
-		DSU_DEBUG_PRINT("  - Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT("  > Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 		sem_post(dsu_sockfd->status_sem);
 	
 	}
@@ -369,8 +360,8 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_accept4 = dlsym(RTLD_NEXT, "accept4");
 	dsu_shutdown = dlsym(RTLD_NEXT, "shutdown");
 	dsu_close = dlsym(RTLD_NEXT, "close");
-	//dsu_fcntl = dlsym(RTLD_NEXT, "fcntl");
-	//dsu_fcntl = dlsym(RTLD_NEXT, "ioctl");
+	dsu_fcntl = dlsym(RTLD_NEXT, "fcntl");
+	dsu_fcntl = dlsym(RTLD_NEXT, "ioctl");
 	dsu_getsockopt = dlsym(RTLD_NEXT, "getsockopt");
 	dsu_setsockopt = dlsym(RTLD_NEXT, "setsockopt");
 	dsu_getsockname = dlsym(RTLD_NEXT, "getsockname");
@@ -396,38 +387,21 @@ static __attribute__((constructor)) void dsu_init() {
 
 /* The prototype stands out in the list of Unix system calls because of the dots, which usually mark the function as having a variable number of arguments. In a real system, however, a system call can't actually have a variable number of arguments. System calls must have a well-defined prototype, because user programs can access them only through hardware "gates." Therefore, the dots in the prototype represent not a variable number of arguments but a single optional argument, traditionally identified as char *argp. The dots are simply there to prevent type checking during compilation. */
 
-/*
-int fcntl(int fd, int cmd, ... ) {
+
+int fcntl(int fd, int cmd, char *argp) {
 	DSU_DEBUG_PRINT("fcntl() (%d-%d)\n", (int) getpid(), (int) gettid());
 	
-	va_list args;
-    va_start(args, cmd);
-	
-	int result = dsu_fcntl(dsu_shadowfd(fd), cmd, args);
-
-    va_end(args);
-
-	return result;
+	return dsu_fcntl(dsu_shadowfd(fd), cmd, argp);
 }
 
 
-int ioctl(int fd, unsigned long request,  ... ) {
+int ioctl(int fd, unsigned long request, char *argp) {
 	DSU_DEBUG_PRINT("ioctl() (%d-%d)\n", (int) getpid(), (int) gettid());
 	
-	va_list args;
-    va_start(args, request);
-	
-	printf(" - %d -> %d\n", fd, dsu_shadowfd(fd));
-	vioctl(fd, request, args);
-	int result = dsu_ioctl(dsu_shadowfd(fd), request, args);
-	printf(" - %d -> %d\n", fd, dsu_shadowfd(fd));
-	
-    va_end(args);
-
-	return result;
+	return dsu_ioctl(dsu_shadowfd(fd), request, argp);
 }
 
-
+/*
 void dsu_sigchild_suppressor(int signum) {	
 	DSU_DEBUG_PRINT("Signal suppressor() (%d-%d)\n", (int) getpid(), (int) gettid());
 	
@@ -483,30 +457,6 @@ int sigaction(int signum, const struct sigaction *restrict act, struct sigaction
 	
 }
 */
-
-
-int getsockopt(int sockfd, int level, int optname, void *restrict optval, socklen_t *restrict optlen) {
-	DSU_DEBUG_PRINT("getsockopt() %d -> %d level:%d opt:%d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), level, optname, (int) getpid(), (int) gettid());
-	return dsu_getsockopt(dsu_shadowfd(sockfd), level, optname, optval, optlen);
-}
-
-
-int setsockopt(int sockfd, int level, int optname, const void *optval, socklen_t optlen) {
-	DSU_DEBUG_PRINT("setsockopt() %d -> %d level:%d opt:%d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), level, optname, (int) getpid(), (int) gettid());
-	return dsu_setsockopt(dsu_shadowfd(sockfd), level, optname, optval, optlen);
-}
-
-
-int getsockname(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
-	DSU_DEBUG_PRINT("Getsockname() (%d-%d)\n", (int) getpid(), (int) gettid());
-	return dsu_getsockname(dsu_shadowfd(sockfd), addr, addrlen);
-}
-
-
-int getpeername(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
-	DSU_DEBUG_PRINT("Getpeername() (%d-%d)\n", (int) getpid(), (int) gettid());
-	return dsu_getpeername(dsu_shadowfd(sockfd), addr, addrlen);
-}
 
 
 int socket(int domain, int type, int protocol) {
@@ -663,7 +613,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 				dsu_socketfd->status_sem = sem_open(pathname_status_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
 				dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
 				
-				DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
+				DSU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
 				if (sem_wait(dsu_socketfd->status_sem) == 0) {
 					
 					dsu_socketfd->version = dsu_socketfd->status[DSU_VERSION];
@@ -673,7 +623,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 						++dsu_socketfd->version;
 					DSU_DEBUG_PRINT(" - version %d (%d-%d)\n", dsu_socketfd->version, (int) getpid(), (int) gettid());
 					
-					DSU_DEBUG_PRINT(" - Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
+					DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
 					sem_post(dsu_socketfd->status_sem);
 				
 				}
@@ -700,7 +650,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 	dsu_socketfd->monitoring = 1;
 	
 
-	DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
 	if (sem_wait(dsu_socketfd->status_sem) == 0) {
 		
 		dsu_socketfd->status[DSU_PGID] = getpgid(getpid());
@@ -708,7 +658,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 		dsu_socketfd->status[DSU_TRANSFER] = 0;
 		dsu_socketfd->transfer = 0;	
 		
-		DSU_DEBUG_PRINT(" - Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
 		sem_post(dsu_socketfd->status_sem);
 	}
 	
