@@ -26,8 +26,4 @@ int getpeername(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict 
 extern int (*dsu_getpeername)(int, struct sockaddr *restrict, socklen_t *restrict);
 
 
-
-
-
-
 #endif

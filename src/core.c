@@ -15,7 +15,7 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
-#include <sys/file.h>
+//#include <sys/file.h>
 #include <semaphore.h>
 #include <pthread.h>
 #include <sys/msg.h>
@@ -27,6 +27,8 @@
 #include "core.h"
 #include "state.h"
 #include "communication.h"
+#include "utils.h"
+#include "file.h"
 
 #include "event_handlers/select.h"
 #include "event_handlers/poll.h"
@@ -38,8 +40,9 @@
 struct dsu_state_struct dsu_program_state;
 
 
-sighandler_t dsu_handler;
-struct sigaction dsu_sigaction;
+
+//sighandler_t dsu_handler;
+//struct sigaction dsu_sigaction;
 
 
 /* 	For the functions socket(), bind(), listen(), accept(), accept4() and close() a wrapper is 
@@ -59,10 +62,6 @@ ssize_t (*dsu_write)(int, const void *, size_t);
 ssize_t (*dsu_send)(int, const void *, size_t, int);
 ssize_t (*dsu_sendto)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
 ssize_t (*dsu_sendmsg)(int, const struct msghdr *, int);
-//sighandler_t (*dsu_signal)(int, sighandler_t);
-
-
-
 
 
 int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
@@ -212,7 +211,8 @@ int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
             
 			
 			/* 	Set socket to non-blocking, several processes might be accepting connections. */
-			fcntl(dsu_sockfd->comfd, F_SETFL, fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK); 
+			int flags = dsu_fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK;
+			dsu_fcntl(dsu_sockfd->comfd, F_SETFL, (char *) &flags);
 			
 			
             DSU_DEBUG_PRINT(" - Initialized communication on  %d fd: %d (%d-%d)\n", dsu_sockfd->port, dsu_sockfd->comfd, (int) getpid(), (int) gettid());
@@ -273,7 +273,7 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 
 int dsu_is_blocking(int fd) {
     
-    int flags = fcntl(fd, F_GETFL, 0);
+    int flags = dsu_fcntl(fd, F_GETFL, 0);
     if ( (flags & O_NONBLOCK) ) return 0;
 
     return 1;
@@ -361,7 +361,7 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_shutdown = dlsym(RTLD_NEXT, "shutdown");
 	dsu_close = dlsym(RTLD_NEXT, "close");
 	dsu_fcntl = dlsym(RTLD_NEXT, "fcntl");
-	dsu_fcntl = dlsym(RTLD_NEXT, "ioctl");
+	dsu_ioctl = dlsym(RTLD_NEXT, "ioctl");
 	dsu_getsockopt = dlsym(RTLD_NEXT, "getsockopt");
 	dsu_setsockopt = dlsym(RTLD_NEXT, "setsockopt");
 	dsu_getsockname = dlsym(RTLD_NEXT, "getsockname");
@@ -374,7 +374,6 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_send = dlsym(RTLD_NEXT, "send");
 	dsu_sendto = dlsym(RTLD_NEXT, "sendto");
 	dsu_sendmsg = dlsym(RTLD_NEXT, "sendmsg");
-	//dsu_signal = dlsym(RTLD_NEXT, "signal");
 
 
 	/* 	Set default function for event-handler wrapper functions. */
@@ -385,21 +384,6 @@ static __attribute__((constructor)) void dsu_init() {
     return;
 }
 
-/* The prototype stands out in the list of Unix system calls because of the dots, which usually mark the function as having a variable number of arguments. In a real system, however, a system call can't actually have a variable number of arguments. System calls must have a well-defined prototype, because user programs can access them only through hardware "gates." Therefore, the dots in the prototype represent not a variable number of arguments but a single optional argument, traditionally identified as char *argp. The dots are simply there to prevent type checking during compilation. */
-
-
-int fcntl(int fd, int cmd, char *argp) {
-	DSU_DEBUG_PRINT("fcntl() (%d-%d)\n", (int) getpid(), (int) gettid());
-	
-	return dsu_fcntl(dsu_shadowfd(fd), cmd, argp);
-}
-
-
-int ioctl(int fd, unsigned long request, char *argp) {
-	DSU_DEBUG_PRINT("ioctl() (%d-%d)\n", (int) getpid(), (int) gettid());
-	
-	return dsu_ioctl(dsu_shadowfd(fd), request, argp);
-}
 
 /*
 void dsu_sigchild_suppressor(int signum) {	

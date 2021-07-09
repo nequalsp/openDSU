@@ -69,8 +69,6 @@ extern int (*dsu_accept)(int, struct sockaddr *restrict, socklen_t *restrict);
 extern int (*dsu_accept4)(int, struct sockaddr *restrict, socklen_t *restrict, int);
 extern int (*dsu_shutdown)(int, int);
 extern int (*dsu_close)(int);
-//extern int (*dsu_fcntl)(int, int, char *);//... /* arg */);
-//extern int (*dsu_ioctl)(int, unsigned long, char *);// ... /* arg */);
 extern int (*dsu_getsockopt)(int, int, int, void *restrict, socklen_t *restrict);
 extern int (*dsu_setsockopt)(int, int, int, const void *, socklen_t);
 extern int (*dsu_getsockname)(int, struct sockaddr *restrict, socklen_t *restrict);

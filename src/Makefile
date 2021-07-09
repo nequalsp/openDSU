@@ -19,8 +19,8 @@ EVENT_OBJS:=$(patsubst event_handlers/%.c, event_handlers/%.o,$(EVENT_SRCS))
 
 all: build 
 
-
-build: ../openDSU ../libopenDSU.so
+# core.o to trigger changes.
+build: ../openDSU ../libopenDSU.so core.o
 
 
 ../libopenDSU.so: $(OBJS) $(EVENT_OBJS)
@@ -36,5 +36,5 @@ build: ../openDSU ../libopenDSU.so
 
 
 clean:
-	rm -rf $(OBJS) $(EVENT_OBJS) ../libopenDSU.so ../openDSU
+	rm -rf $(OBJS) $(EVENT_OBJS) ../libopenDSU.so ../openDSU core.o
 

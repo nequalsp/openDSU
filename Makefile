@@ -11,16 +11,27 @@ LIB=/usr/local/lib
 BIN=/usr/local/bin
 
 
-all: build install test
+all: uninstall build install
+
+
 
 
 build: 
 	$(MAKE) -C ./src build
 
 
-install: 
+
+
+
+install: $(LIB)/libopenDSU.so $(BIN)/openDSU
+
+$(LIB)/libopenDSU.so: 
 	cp libopenDSU.so $(LIB)/libopenDSU.so
+
+$(BIN)/openDSU:
 	cp openDSU $(BIN)/openDSU
+
+
 
 
 uninstall:
@@ -28,13 +39,25 @@ uninstall:
 	rm -f $(BIN)/openDSU
 
 
+
+
+
 test:
 	$(MAKE) -C ./tests test
 
 
-clean: uninstall
+
+
+benchmark:
+	$(MAKE) -C ./benchmarking benchmark
+
+
+
+clean:
 	$(MAKE) -C ./tests clean
 	$(MAKE) -C ./src clean
+	$(MAKE) -C ./benchmark clean
+	rm -f /var/log/dsu_*
 	
 
 
