@@ -4,13 +4,15 @@ current_dir := $(dir $(mkfile_path))
 
 
 
-benchmark: lighttpd.o nginx.o
+benchmark: server
 
+
+server: lighttpd.o nginx.o apache.o
 
 
 
 # Install lighttpd.
-lighttpd.o: lighttpd1.4/src/lighttpd lighttpd1.4/src/libs/mod_access.so
+lighttpd.o: lighttpd1.4/src/lighttpd lighttpd1.4/src/libs/mod_access.so config/lighttpd.conf
 	cp lighttpd1.4/src/lighttpd lighttpd.o
 
 lighttpd1.4:
@@ -24,7 +26,8 @@ lighttpd1.4/Makefile: lighttpd1.4/Makefile.in
 	cd lighttpd1.4;\
 	./configure --libdir=$(current_dir)lighttpd1.4/src/libs\
 		--libexecdir=$(current_dir)lighttpd1.4/src/libs\
-		--sysconfdir=$(current_dir)config
+		--sysconfdir=$(current_dir)config\
+		--prefix=$(current_dir)etc/lighttpd
 
 lighttpd1.4/src/lighttpd: lighttpd1.4/Makefile
 	cd lighttpd1.4;\
@@ -34,7 +37,13 @@ lighttpd1.4/src/libs/mod_access.so: lighttpd1.4/Makefile
 	cd lighttpd1.4;\
 	mkdir -p src/libs;\
 	make install
-	
+
+config/lighttpd.conf:
+	cp config/.lighttpd.conf config/lighttpd.conf
+	sudo sed -i "s;{{dsu_www}};$(current_dir)www;" config/lighttpd.conf
+
+etc/lighttpd:
+	mkdir -p $(current_dir)etc/lighttpd
 
 
 
@@ -47,7 +56,7 @@ nginx/Makefile: nginx
 	cd nginx;\
 	./auto/configure \
 		--user=root \
-		--build=Ubuntu \
+		--prefix=$(current_dir)etc/nginx\
 		--sbin-path=$(current_dir) \
 		--conf-path=$(current_dir)config/nginx.conf \
 		--with-select_module \
@@ -57,7 +66,17 @@ nginx/objs/nginx: nginx/Makefile
 	cd nginx;\
 	make
 
-nginx.o: nginx/objs/nginx
+config/nginx.conf:
+	cp config/.nginx.conf config/nginx.conf
+	sudo sed -i "s;{{dsu_www}};$(current_dir)www;" config/nginx.conf
+
+etc/nginx:
+	mkdir -p $(current_dir)etc/nginx
+
+etc/nginx/logs: etc/nginx
+	mkdir -p $(current_dir)etc/nginx/logs
+
+nginx.o: nginx/objs/nginx config/nginx.conf etc/nginx/logs
 	cp nginx/objs/nginx nginx.o
 
 
@@ -90,8 +109,11 @@ etc/apache/httpd: apache/Makefile
 	cd apache;\
 	make;\
 	make install
+	sudo rm -f etc/apache/conf/httpd.conf
 
 etc/apache/conf/httpd.conf:
+	cp config/.apache.conf config/apache.conf
+	sudo sed -i "s;{{dsu_www}};$(current_dir)www;" config/apache.conf
 	cp config/apache.conf etc/apache/conf/httpd.conf
 
 apache.o: etc/apache/logs etc/apache/httpd etc/apache/conf/httpd.conf
@@ -101,11 +123,7 @@ apache.o: etc/apache/logs etc/apache/httpd etc/apache/conf/httpd.conf
 
 
 clean:
-	rm -rf lighttpd1.4
-	rm -rf nginx
-	rm -rf apache
-	rm -rf etc
-	rm -f nginx.o
-	rm -f lighttpd.o
-	rm -f apache.o
+	rm -rf lighttpd1.4 nginx apache etc
+	rm -f nginx.o lighttpd.o apache.o
+	rm -f config/nginx.conf config/apache.conf config/lighttpd.conf
 
