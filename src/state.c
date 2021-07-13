@@ -214,3 +214,17 @@ int dsu_originalfd(int shadowfd) {
     
     return shadowfd;
 }
+
+
+int dsu_is_internal_conn(int fd) {
+	/*	If socket is not used for monitoring or internal connection, it is not an internal connection. */
+	
+	if ( dsu_sockets_search_fds(dsu_program_state.binds, fd, DSU_MONITOR_FD) != NULL) return 1;
+
+
+	if ( dsu_sockets_search_fds(dsu_program_state.binds, fd, DSU_INTERNAL_FD) != NULL) return 1;
+	
+
+ 	return 0;
+
+}

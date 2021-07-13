@@ -1,7 +1,7 @@
 #include <sys/socket.h>
 #include <errno.h>
 #include <unistd.h>
-#include <poll.h>
+#include <sys/poll.h>
 
 #include <netinet/in.h>
 #include <netinet/ip.h>

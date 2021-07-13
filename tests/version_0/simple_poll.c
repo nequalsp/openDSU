@@ -7,7 +7,7 @@
 #include <netinet/in.h>
 #include <netdb.h>
 #include <sys/un.h>
-#include <poll.h>
+#include <sys/poll.h>
 
 
 #define PORT    3000

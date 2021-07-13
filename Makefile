@@ -4,7 +4,7 @@ CFLAGS	+= -g2
 CC?=gcc
 
 
-DEBUG= -D DEBUG
+DEBUG= #-D DEBUG
 
 	
 LIB=/usr/local/lib
@@ -48,8 +48,8 @@ test:
 
 
 
-benchmark:
-	$(MAKE) -C ./benchmarking benchmark
+benchmarks:
+	$(MAKE) -C ./benchmark benchmark
 
 
 

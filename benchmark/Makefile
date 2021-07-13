@@ -91,6 +91,7 @@ apache:
 apache/configure: apache
 	cd apache;\
 	svn co http://svn.apache.org/repos/asf/apr/apr/trunk srclib/apr;\
+	#export ac_cv_func_poll=no;\
 	./buildconf
 
 apache/Makefile: apache/configure

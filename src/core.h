@@ -16,7 +16,7 @@
 
 
 #if DSU_DEBUG == 1
-#define DSU_DEBUG_PRINT(format, ...) {printf(format, ## __VA_ARGS__); fprintf(dsu_program_state.logfd, format, ## __VA_ARGS__); fflush(dsu_program_state.logfd);}
+#define DSU_DEBUG_PRINT(format, ...) { fprintf(dsu_program_state.logfd, format, ## __VA_ARGS__); fflush(dsu_program_state.logfd);}
 #else
 #define DSU_DEBUG_PRINT(format, ...)
 #endif

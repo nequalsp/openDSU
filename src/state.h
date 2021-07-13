@@ -126,8 +126,11 @@ struct dsu_socket_list *dsu_sockets_search_fds(struct dsu_socket_list *node, int
 /*	Switch user level file descriptor to shadow file descriptor (possible inhirited). */
 int dsu_shadowfd(int fd);
 
-/*	Swtich shadow file descriptor back to user level file descriptor. */
+/*	Switch shadow file descriptor back to user level file descriptor. */
 int dsu_originalfd(int shadowfd);
+
+/* 	Check if the file descriptor is an internal connection. */
+int dsu_is_internal_conn(int fd);
 
 #endif
 

@@ -15,7 +15,6 @@
 #include <sys/types.h>
 #include <sys/ipc.h>
 #include <sys/shm.h>
-//#include <sys/file.h>
 #include <semaphore.h>
 #include <pthread.h>
 #include <sys/msg.h>
@@ -32,6 +31,7 @@
 
 #include "event_handlers/select.h"
 #include "event_handlers/poll.h"
+#include "event_handlers/epoll.h"
 
 
 /* 	Global variable containing pointers to the used data structures and state of the program. Every binded file descriptor
@@ -291,7 +291,7 @@ void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd) {
 static __attribute__((constructor)) void dsu_init() {
 	/*	LD_Preload constructor is called before the binary starts. Initialze the program state. */
 	
-	
+
 	#if DSU_DEBUG == 1
     int size = snprintf(NULL, 0, "%s_%d.log", DSU_LOG, (int) getpid());
 	char logfile[size+1];	
@@ -311,7 +311,7 @@ static __attribute__((constructor)) void dsu_init() {
 			
 	dsu_program_state.live = 0;
 	
-	
+
 	/* 	Create shared memory, to trace number of active worker processes. */
     int pathname_size = snprintf(NULL, 0, "/%s_%d.state", DSU_COMM, (int) getpgid(getpid()));
     char pathname[pathname_size+1];
@@ -379,8 +379,11 @@ static __attribute__((constructor)) void dsu_init() {
 	/* 	Set default function for event-handler wrapper functions. */
 	dsu_select = dlsym(RTLD_NEXT, "select");
 	dsu_poll = dlsym(RTLD_NEXT, "poll");
+	dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
+	dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
+	dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
+	dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
 
-	
     return;
 }
 
