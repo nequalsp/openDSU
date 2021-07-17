@@ -307,7 +307,7 @@ int poll(struct pollfd *fds, nfds_t nfds, int timeout) {
 	#endif
 
 
-	/* 	On first call to select, mark worker active and configure binded sockets. */
+	/* 	On first call to poll, mark worker active and configure binded sockets. */
 	if (!dsu_program_state.live) {	
 		
 		dsu_activate_process();

@@ -4,10 +4,10 @@
 void dsu_socket_list_init(struct dsu_socket_list *dsu_socket) {
     
 	dsu_socket->port        = 0;
-    dsu_socket->fd      	= 0;
+    dsu_socket->fd      	= -1;
 	dsu_socket->fds      	= NULL;
-    dsu_socket->shadowfd    = 0;
-    dsu_socket->comfd       = 0;
+    dsu_socket->shadowfd    = -1;
+    dsu_socket->comfd       = -1;
     dsu_socket->comfds      = NULL;
 	dsu_socket->status      = NULL;
 	dsu_socket->monitoring	= 0;
@@ -16,6 +16,7 @@ void dsu_socket_list_init(struct dsu_socket_list *dsu_socket) {
 	dsu_socket->locked		= 0;
 	dsu_socket->transfer 	= 0;
     dsu_socket->blocking 	= 0;    // Conservative.
+	dsu_socket->flags		= 0;
 
 }
 

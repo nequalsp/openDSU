@@ -35,6 +35,7 @@ struct dsu_socket_list {
 	struct dsu_fd_list *fds;		// Accepted connections.
     int shadowfd;
     int port;
+	int flags;						// Needed in Epoll.
     
 
     /*  Linked list with accepted connections used for communication

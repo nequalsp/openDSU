@@ -22,6 +22,9 @@ void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Listen under the hood to accepted connections on public socket. A new generation can request
         file descriptors. During DUAL listening, only one  */
     
+
+	/*	HACK if readfds is NULL TO DO set in program state so that malloc can be called and it will be removed. */
+	if (readfds == NULL) return;
 	
 	if (dsu_sockfd->monitoring) {
 		DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
@@ -53,7 +56,7 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	
 	/*  Race conditions could happend when a "late" fork is performed. The fork happend after 
         accepting dsu communication connection. */
-	if (FD_ISSET(dsu_sockfd->comfd, readfds)) {
+	if (readfds != NULL && FD_ISSET(dsu_sockfd->comfd, readfds)) {
 		
 		++correction;
 	
@@ -78,7 +81,7 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
    	
     while (comfds != NULL) {
     
-        if (FD_ISSET(comfds->fd, readfds)) {
+        if (readfds != NULL && FD_ISSET(comfds->fd, readfds)) {
 
 			
 			DSU_DEBUG_PRINT(" - remove %d (%d-%d)\n", comfds->fd, (int) getpid(), (int) gettid());
@@ -150,12 +153,10 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 
 
 void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
-    /*  Change socket file descripter to its shadow file descriptor. */   
-   	
+    /*  Change socket file descripter to its shadow file descriptor. */  
 	
-    if (FD_ISSET(dsu_sockfd->fd, readfds)) {
-		
-		
+    if (readfds != NULL && FD_ISSET(dsu_sockfd->fd, readfds)) {
+
 		/*  Deactivate original file descriptor. */
 		FD_CLR(dsu_sockfd->fd, readfds);
 
@@ -218,7 +219,7 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     }
 
     
-    if (FD_ISSET(dsu_sockfd->shadowfd, readfds)) {
+    if (readfds != NULL && FD_ISSET(dsu_sockfd->shadowfd, readfds)) {
 		DSU_DEBUG_PRINT(" - Reset %d => %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->fd, (int) getpid(), (int) gettid());
         FD_CLR(dsu_sockfd->shadowfd, readfds);
         FD_SET(dsu_sockfd->fd, readfds);
@@ -228,7 +229,7 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 
 
 int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
-	DSU_DEBUG_PRINT("Select() (%d-%d)\n", (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT("Select() size:%d (%d-%d)\n", nfds, (int) getpid(), (int) gettid());
     /*  Select() allows a program to monitor multiple file descriptors, waiting until one or more of the file descriptors 
         become "ready". The DSU library will modify this list by removing file descriptors that are transfered, and change
         file descriptors to their shadow file descriptors. */
@@ -239,7 +240,6 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	fd_set original_readfds; if (readfds != NULL) original_readfds = *readfds;
 	fd_set original_writefds; if (writefds != NULL) original_writefds = *writefds;
     fd_set original_exceptfds; if (exceptfds != NULL) original_exceptfds = *exceptfds;
-
 	
     /*  It might be necessary to increase the maximum file descriptors that need to be monitored. */
 	max_fds = nfds;
@@ -252,12 +252,12 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	
     #if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
-		if ( FD_ISSET(i, readfds) ) {
+		if ( readfds != NULL && FD_ISSET(i, readfds) ) {
 			DSU_DEBUG_PRINT(" - User listening: %d (%d-%d)\n", i, (int) getpid(), (int) gettid());
 		}
 	#endif
 	
-	
+
 	/* 	On first call to select, mark worker active and configure binded sockets. */
 	if (!dsu_program_state.live) {	
 		
@@ -272,20 +272,20 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	/* 	Mark version of the file descriptors. */
 	dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
     
-    
+
 	if (dsu_termination_detection()) {
 		dsu_terminate();
 	}
 	
-    
+    DSU_DEBUG_PRINT(" - TEST PRESELECT: (%d-%d)\n", (int) getpid(), (int) gettid());
     /*  Convert to shadow file descriptors, this must be done for binded sockets. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_pre_select, readfds);
-    
-    
+    DSU_DEBUG_PRINT(" - TEST SNIFF: (%d-%d)\n", (int) getpid(), (int) gettid());
+
     /*  Sniff on internal communication.  */    
     dsu_forall_sockets(dsu_program_state.binds, dsu_sniff_conn, readfds);
 
-    
+	DSU_DEBUG_PRINT(" - TEST BlOCKING: (%d-%d)\n", (int) getpid(), (int) gettid());
 	/* To support non-blocking sockets, narrow down the time between locks. */
 	struct timeval tv; struct timeval *ptv = &tv;
 	if (transfer == 1) {tv.tv_sec = 0; tv.tv_usec = 100;}
@@ -294,31 +294,34 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 
 	#if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
-		if ( FD_ISSET(i, readfds) ) {
+		if (readfds != NULL && FD_ISSET(i, readfds) ) {
 			DSU_DEBUG_PRINT(" - Listening: %d (%d-%d)\n", i, (int) getpid(), (int) gettid());
 		}
 	DSU_DEBUG_PRINT(" - Size: %d (%d-%d)\n", max_fds, (int) getpid(), (int) gettid());
 	#endif
 
-
+	DSU_DEBUG_PRINT(" - TEST SELECT: %d (%d-%d)\n", max_fds, (int) getpid(), (int) gettid());
     int result = dsu_select(max_fds, readfds, writefds, exceptfds, ptv);
+	perror("test");
+	DSU_DEBUG_PRINT(" - TEST SELECT: (%d-%d)\n", (int) getpid(), (int) gettid());
     if (result == -1) {
+		DSU_DEBUG_PRINT(" - error: (%d-%d)\n", (int) getpid(), (int) gettid());
 		return result;
 	}
-
+	
     
 	#if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
-		if ( FD_ISSET(i, readfds) ) {
+		if ( readfds != NULL && FD_ISSET(i, readfds) ) {
 			DSU_DEBUG_PRINT(" - Incomming: %d (%d-%d)\n", i, (int) getpid(), (int) gettid());
 		}
 	#endif
     
-    
+    DSU_DEBUG_PRINT(" - TEST HANDLE: (%d-%d)\n", (int) getpid(), (int) gettid());
     /*  Handle messages of new processes. */ 
     dsu_forall_sockets(dsu_program_state.binds, dsu_handle_conn, readfds);
     
-
+	 DSU_DEBUG_PRINT(" - TEST POST SELECT: (%d-%d)\n", (int) getpid(), (int) gettid());
     /*  Convert shadow file descriptors back to user level file descriptors to avoid changing the external behaviour. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_post_select, readfds);
 
@@ -345,7 +348,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 
 	#if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
-		if ( FD_ISSET(i, readfds) ) {
+		if ( readfds != NULL && FD_ISSET(i, readfds) ) {
 			DSU_DEBUG_PRINT(" - User incomming: %d (%d-%d)\n", i, (int) getpid(), (int) gettid());
 		}
 	DSU_DEBUG_PRINT(" - Return size: %d (%d-%d)\n", result - _correction, (int) getpid(), (int) gettid());

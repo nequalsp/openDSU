@@ -32,8 +32,25 @@ int epoll_create(int size) {
 
 
 int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event) {
-	DSU_DEBUG_PRINT(" Epoll_ctl() (%d)\n", (int) getpid());
-	return dsu_epoll_ctl(epfd, op, fd, event);
+	DSU_DEBUG_PRINT(" Epoll_ctl() fd:%d (%d)\n", fd, (int) getpid());
+
+
+	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, fd);
+	
+
+	if (dsu_sockfd == NULL)	return dsu_epoll_ctl(epfd, op, fd, event);
+	
+	
+	if (op == EPOLL_CTL_ADD || op == EPOLL_CTL_MOD) {
+		DSU_DEBUG_PRINT(" - Store flags %d -> %d (%d)\n", fd, dsu_sockfd->shadowfd, (int) getpid());
+		dsu_sockfd->flags = event->events;
+	} else {
+		DSU_DEBUG_PRINT(" - Delete %d -> %d (%d)\n", fd, dsu_sockfd->shadowfd, (int) getpid());
+		dsu_sockfd->flags = 0;
+	}
+
+
+	return dsu_epoll_ctl(epfd, op, dsu_sockfd->shadowfd, event);
 }
 
 
@@ -75,7 +92,7 @@ void dsu_epoll_internal_conn(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int nfds, struct epoll_event *events) {
 	DSU_DEBUG_PRINT(" - Handle on %d (%d)\n", dsu_sockfd->port, (int) getpid());
 		
-	
+	DSU_DEBUG_PRINT(" - TEST %d (%d)\n", nfds, (int) getpid());
 	for(int i = 0; i < nfds; i++) {
 
 
@@ -103,7 +120,7 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 		
 		}
 	
-	
+		DSU_DEBUG_PRINT(" - TEST (%d)\n", (int) getpid());
 		/* 	Respond to messages. */
 		struct dsu_fd_list *comfds =   dsu_sockfd->comfds;
 		while (comfds != NULL) {
@@ -186,11 +203,11 @@ void dsu_epoll_shadowfd(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 
 	/* 	Set shadow file descriptor if needed... */
 	struct epoll_event ev; 
-	ev.events = EPOLLIN; // This must be derived by use of epoll_ctl; TO DO!
+	ev.events = dsu_sockfd->flags;
     ev.data.fd = dsu_sockfd->shadowfd;
 
 
-	if (dsu_sockfd->monitoring) { 
+	if (dsu_sockfd->monitoring && dsu_sockfd->flags != 0) { 
 		
 
 		DSU_DEBUG_PRINT(" < Lock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
@@ -262,7 +279,7 @@ void dsu_epoll_originalfd(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 
 	
 	struct epoll_event ev;
-	ev.events = EPOLLIN; // This must be derived by use of epoll_ctl; TO DO!
+	ev.events = dsu_sockfd->flags;
 	ev.data.fd = dsu_sockfd->fd;
 
 	
@@ -349,7 +366,7 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 	DSU_DEBUG_PRINT(" Epoll_wait() (%d)\n", (int) getpid());
 
 
-	/* 	On first call to select, mark worker active and configure binded sockets. */
+	/* 	On first call to epoll_wait, mark worker active and configure binded sockets. */
 	if (!dsu_program_state.live) {	
 		
 		dsu_activate_process();

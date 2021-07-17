@@ -91,14 +91,16 @@ apache:
 apache/configure: apache
 	cd apache;\
 	svn co http://svn.apache.org/repos/asf/apr/apr/trunk srclib/apr;\
-	#export ac_cv_func_poll=no;\
 	./buildconf
 
 apache/Makefile: apache/configure
 	cd apache;\
 	./configure\
 		--prefix=$(current_dir)etc/apache\
-		--libdir=$(current_dir)etc/modules
+		--libdir=$(current_dir)etc/apache/modules\
+		--with-included-apr
+		--with-apr=$(current_dir)apache/srclib/apr
+		
 
 etc/apache:
 	mkdir -p $(current_dir)etc/apache
@@ -118,13 +120,13 @@ etc/apache/conf/httpd.conf:
 	cp config/apache.conf etc/apache/conf/httpd.conf
 
 apache.o: etc/apache/logs etc/apache/httpd etc/apache/conf/httpd.conf
-	cp apache/httpd apache.o
+	cp apache/.libs/httpd apache.o
 	
 
 
 
 clean:
 	rm -rf lighttpd1.4 nginx apache etc
-	rm -f nginx.o lighttpd.o apache.o
+	rm -f nginx.o lighttpd.o apache.o httpd
 	rm -f config/nginx.conf config/apache.conf config/lighttpd.conf
 

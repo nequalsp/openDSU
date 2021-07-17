@@ -51,12 +51,22 @@ test:
 benchmarks:
 	$(MAKE) -C ./benchmark benchmark
 
+apache:
+	$(MAKE) -C ./benchmark apache.o
+
+nginx:
+	$(MAKE) -C ./benchmark nginx.o
+
+httpdlight:
+	$(MAKE) -C ./benchmark httpdlight.o
+
+
 
 
 clean:
 	$(MAKE) -C ./tests clean
 	$(MAKE) -C ./src clean
-	$(MAKE) -C ./benchmark clean
+	#$(MAKE) -C ./benchmark clean
 	rm -f /var/log/dsu_*
 	
 
