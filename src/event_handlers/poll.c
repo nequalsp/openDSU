@@ -1,3 +1,5 @@
+#define _GNU_SOURCE
+
 #include <sys/socket.h>
 #include <errno.h>
 #include <unistd.h>
@@ -12,7 +14,7 @@
 
 
 int (*dsu_poll)(struct pollfd *, nfds_t, int);
-
+int (*dsu_ppoll)(struct pollfd *, nfds_t, const struct timespec *, const sigset_t *);
 
 int nfds_max;
 int correction;
@@ -289,8 +291,9 @@ void dsu_post_poll(struct pollfd *fds, struct pollfd *_fds, nfds_t _nfds) {
 }
 
 
-int poll(struct pollfd *fds, nfds_t nfds, int timeout) {
-	DSU_DEBUG_PRINT("Poll() (%d)\n", (int) getpid());
+int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, const sigset_t *sigmask) {
+	
+	DSU_DEBUG_PRINT("PPoll() (%d)\n", (int) getpid());
     /* 	Poll() performs a similar task to select(2): it waits for one of a set of file descriptors to become ready to perform I/O. The set 
 		of file descriptors to be monitored is specified in the fds argument, which is an array of structures of the following form:
            struct pollfd {
@@ -353,7 +356,7 @@ int poll(struct pollfd *fds, nfds_t nfds, int timeout) {
 	#endif
 
 
-    int result = dsu_poll(_fds, _nfds, timeout);
+    int result = dsu_ppoll(_fds, _nfds, timeout_ts, sigmask);
     if (result <= 0) {
 		return result;
 	}
@@ -384,4 +387,34 @@ int poll(struct pollfd *fds, nfds_t nfds, int timeout) {
 	
 	
 	return result - correction;
+}
+
+
+int poll(struct pollfd *fds, nfds_t nfds, int timeout) {
+	DSU_DEBUG_PRINT("Poll() (%d)\n", (int) getpid());
+
+	struct timespec timeout_ts;
+  	struct timespec *timeout_ts_p = NULL;
+
+	if (timeout >= 0) {
+		  timeout_ts.tv_sec = timeout / 1000;
+		  timeout_ts.tv_nsec = (timeout % 1000) * 1000000;
+		  timeout_ts_p = &timeout_ts;
+	}
+	
+	return ppoll(fds, nfds, timeout_ts_p, NULL);
+	
+}
+
+
+/*	Newer libc versions. */
+int __poll_chk(struct pollfd *fds, nfds_t nfds, int timeout, size_t fdslen) {
+	DSU_DEBUG_PRINT("__poll_chk() (%d)\n", (int) getpid());
+	return poll(fds, nfds, timeout);
+}
+
+
+int __ppoll_chk (struct pollfd *fds, nfds_t nfds, const struct timespec *timeout, const __sigset_t *ss, __SIZE_TYPE__ fdslen) {
+	DSU_DEBUG_PRINT("__ppoll_chk() (%d)\n", (int) getpid());
+	return ppoll(fds, nfds, timeout, ss);
 }

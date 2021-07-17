@@ -249,7 +249,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
         and decrease the timeout. */
 	transfer = 0;
 	
-	
+	DSU_DEBUG_PRINT(" - TEST 1: (%d-%d)\n", (int) getpid(), (int) gettid());
     #if DSU_DEBUG == 1
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if ( readfds != NULL && FD_ISSET(i, readfds) ) {
@@ -257,7 +257,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 		}
 	#endif
 	
-
+	DSU_DEBUG_PRINT(" - TEST PRESELECT: (%d-%d)\n", (int) getpid(), (int) gettid());
 	/* 	On first call to select, mark worker active and configure binded sockets. */
 	if (!dsu_program_state.live) {	
 		

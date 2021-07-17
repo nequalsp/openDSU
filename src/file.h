@@ -8,6 +8,8 @@
 #define F_SETFD		2
 #define F_GETFL		3	
 #define F_SETFL		4
+#define O_TMPFILE	020000000
+
 #ifndef O_CREAT
 #define O_CREAT		00000100	/* not fcntl */
 #endif
@@ -23,3 +25,7 @@
 #ifndef O_NONBLOCK
 #define O_NONBLOCK	00004000
 #endif
+
+
+
+

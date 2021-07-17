@@ -54,6 +54,9 @@ int (*dsu_accept)(int, struct sockaddr *restrict, socklen_t *restrict);
 int (*dsu_accept4)(int, struct sockaddr *restrict, socklen_t *restrict, int);
 int (*dsu_shutdown)(int, int);
 int (*dsu_close)(int);
+int (*dsu_dup)(int);
+int (*dsu_dup2)(int, int);
+int (*dsu_dup3)(int, int, int);
 ssize_t (*dsu_read)(int, void *, size_t);
 ssize_t (*dsu_recv)(int, void *, size_t, int);
 ssize_t (*dsu_recvfrom)(int, void *restrict, size_t, int, struct sockaddr *restrict, socklen_t *restrict);
@@ -63,6 +66,8 @@ ssize_t (*dsu_send)(int, const void *, size_t, int);
 ssize_t (*dsu_sendto)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
 ssize_t (*dsu_sendmsg)(int, const struct msghdr *, int);
 
+int (*dsu_open)(const char *, int, mode_t);
+int (*dsu_creat)(const char *, mode_t);
 
 int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 	DSU_DEBUG_PRINT(" - Inherit fd %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
@@ -362,6 +367,9 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_close = dlsym(RTLD_NEXT, "close");
 	dsu_fcntl = dlsym(RTLD_NEXT, "fcntl");
 	dsu_ioctl = dlsym(RTLD_NEXT, "ioctl");
+	dsu_dup = dlsym(RTLD_NEXT, "dup");
+	dsu_dup2 = dlsym(RTLD_NEXT, "dup2");
+	dsu_dup3 = dlsym(RTLD_NEXT, "dup3");
 	dsu_getsockopt = dlsym(RTLD_NEXT, "getsockopt");
 	dsu_setsockopt = dlsym(RTLD_NEXT, "setsockopt");
 	dsu_getsockname = dlsym(RTLD_NEXT, "getsockname");
@@ -375,10 +383,13 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_sendto = dlsym(RTLD_NEXT, "sendto");
 	dsu_sendmsg = dlsym(RTLD_NEXT, "sendmsg");
 
+	dsu_open = dlsym(RTLD_NEXT, "open");
+	dsu_creat = dlsym(RTLD_NEXT, "creat");
 
 	/* 	Set default function for event-handler wrapper functions. */
 	dsu_select = dlsym(RTLD_NEXT, "select");
 	dsu_poll = dlsym(RTLD_NEXT, "poll");
+	dsu_ppoll = dlsym(RTLD_NEXT, "ppoll");
 	dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
 	dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
 	dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
@@ -462,8 +473,52 @@ int socket(int domain, int type, int protocol) {
         dsu_sockets_add(&dsu_program_state.sockets, &dsu_socket);
     }
 	
+	DSU_DEBUG_PRINT(" - fd: %d(%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
     
     return sockfd;
+}
+
+
+int dup(int oldfd) {
+	DSU_DEBUG_PRINT("Dup() (%d-%d)\n", (int) getpid(), (int) gettid());
+	return dsu_dup(dsu_shadowfd(oldfd));
+}
+
+
+int dup2(int oldfd, int newfd) {
+	DSU_DEBUG_PRINT("Dup2() (%d-%d)\n", (int) getpid(), (int) gettid());
+	return dsu_dup2(dsu_shadowfd(oldfd), dsu_shadowfd(newfd));
+}
+
+
+int dup3(int oldfd, int newfd, int flags) {
+	DSU_DEBUG_PRINT("Dup3() (%d-%d)\n", (int) getpid(), (int) gettid());
+	int fd = dsu_dup3(dsu_shadowfd(oldfd), dsu_shadowfd(newfd), flags);
+	DSU_DEBUG_PRINT(" - %d = %d (%d-%d)\n", fd, oldfd, (int) getpid(), (int) gettid());
+	return fd;
+}
+
+
+/*int open(const char *pathname, int flags, ...) {
+	DSU_DEBUG_PRINT("Open() %s (%d-%d)\n", pathname, (int) getpid(), (int) gettid());
+	
+	int mode = 0;
+    if (flags & (O_CREAT|O_TMPFILE))
+    {
+		va_list args;
+    	va_start(args, flags);
+		mode = va_arg(args, int);
+		va_end(args);
+	}
+
+	
+	return dsu_open(pathname, flags, mode);
+}*/
+
+
+int creat(const char *pathname, mode_t mode) {
+	DSU_DEBUG_PRINT("creat() %s (%d-%d)\n", pathname, (int) getpid(), (int) gettid());
+	return dsu_creat(pathname, mode);
 }
 
 
@@ -720,7 +775,7 @@ int shutdown(int sockfd, int how) {
 
 
 int close(int sockfd) {
-	DSU_DEBUG_PRINT("Close() (%d-%d)\n", (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT("Close() fd: %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
 	/*	close() closes a file descriptor, so that it no longer refers to any file and may be reused. Therefore, the the shadow file descriptor
 		should also be removed / closed. The file descriptor can exist in:
 			1.	Unbinded sockets 	-> 	dsu_program_State.sockets

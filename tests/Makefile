@@ -1,7 +1,7 @@
 # Compilation settings
 CFLAGS	+= -Wall -Werror
 CFLAGS	+= -O3
-CFLAGS	+= -g2
+CFLAGS	+= -g2 
 CC?=gcc
 
 LIBS=-pthread

@@ -100,6 +100,7 @@ apache/Makefile: apache/configure
 		--libdir=$(current_dir)etc/apache/modules\
 		--with-included-apr
 		--with-apr=$(current_dir)apache/srclib/apr
+		--with-mpm=prefork
 		
 
 etc/apache:

@@ -21,13 +21,17 @@ int (*dsu_epoll_ctl)(int, int, int, struct epoll_event *);
 
 int epoll_create1(int flags) {
 	DSU_DEBUG_PRINT(" Epoll_create1() (%d)\n", (int) getpid());
-	return dsu_epoll_create1(flags);
+	int fd = dsu_epoll_create1(flags);
+	DSU_DEBUG_PRINT(" - fd: %d (%d)\n", fd, (int) getpid());
+	return fd;
 }
 	
 
 int epoll_create(int size) {
 	DSU_DEBUG_PRINT(" Epoll_create() (%d)\n", (int) getpid());
-	return dsu_epoll_create(size);
+	int fd = dsu_epoll_create(size);
+	DSU_DEBUG_PRINT(" - fd: %d (%d)\n", fd, (int) getpid());
+	return fd;
 }
 
 
@@ -43,10 +47,10 @@ int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event) {
 	
 	if (op == EPOLL_CTL_ADD || op == EPOLL_CTL_MOD) {
 		DSU_DEBUG_PRINT(" - Store flags %d -> %d (%d)\n", fd, dsu_sockfd->shadowfd, (int) getpid());
-		dsu_sockfd->flags = event->events;
+		memcpy(&dsu_sockfd->ev, event, sizeof(struct epoll_event));
 	} else {
 		DSU_DEBUG_PRINT(" - Delete %d -> %d (%d)\n", fd, dsu_sockfd->shadowfd, (int) getpid());
-		dsu_sockfd->flags = 0;
+		memcpy(&dsu_sockfd->ev, 0, sizeof(struct epoll_event));
 	}
 
 
@@ -61,30 +65,31 @@ void dsu_epoll_internal_conn(struct dsu_socket_list *dsu_sockfd, int epollfd) {
         file descriptors. During DUAL listening, only one  */
     
 	struct epoll_event ev;
-	
+	ev.events = EPOLLIN;
+
+	DSU_DEBUG_PRINT(" - INTERNAL 1 (%d)\n", (int) getpid());
 	if (dsu_sockfd->monitoring) {
 		
 		DSU_DEBUG_PRINT(" - Add %d (%d)\n", dsu_sockfd->comfd, (int) getpid());
-		ev.events = EPOLLIN;
         ev.data.fd = dsu_sockfd->comfd;
 		dsu_epoll_ctl(epollfd, EPOLL_CTL_ADD, dsu_sockfd->comfd, &ev); // TO DO error
 
 	}
 	
-    
+    DSU_DEBUG_PRINT(" - INTERNAL 2 (%d)\n", (int) getpid());
 	/* Contains zero or more accepted connections. */
 	struct dsu_fd_list *comfds = dsu_sockfd->comfds;   
 	
 	while (comfds != NULL) {
 
 	    DSU_DEBUG_PRINT(" - Add %d (%d)\n", comfds->fd, (int) getpid());
-		ev.events = EPOLLIN;
         ev.data.fd = comfds->fd;
 		dsu_epoll_ctl(epollfd, EPOLL_CTL_ADD, comfds->fd, &ev); // TO DO error
 
 		
 	    comfds = comfds->next;        
 	}
+	DSU_DEBUG_PRINT(" - INTERNAL 3 (%d)\n", (int) getpid());
 	
 }
 
@@ -92,7 +97,7 @@ void dsu_epoll_internal_conn(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int nfds, struct epoll_event *events) {
 	DSU_DEBUG_PRINT(" - Handle on %d (%d)\n", dsu_sockfd->port, (int) getpid());
 		
-	DSU_DEBUG_PRINT(" - TEST %d (%d)\n", nfds, (int) getpid());
+	DSU_DEBUG_PRINT(" - HANDLE 1 (%d)\n", (int) getpid());
 	for(int i = 0; i < nfds; i++) {
 
 
@@ -120,7 +125,7 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 		
 		}
 	
-		DSU_DEBUG_PRINT(" - TEST (%d)\n", (int) getpid());
+		DSU_DEBUG_PRINT(" - HANDLE 2 (%d)\n", (int) getpid());
 		/* 	Respond to messages. */
 		struct dsu_fd_list *comfds =   dsu_sockfd->comfds;
 		while (comfds != NULL) {
@@ -190,6 +195,8 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 		            
 		}
 	}
+
+	DSU_DEBUG_PRINT(" - HANDLE 3 (%d)\n", (int) getpid());
 }
 
 
@@ -197,17 +204,19 @@ void dsu_epoll_shadowfd(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 	
 
 	/*	Deactivate socket. */
-	DSU_DEBUG_PRINT(" - remove %d (%d)\n", dsu_sockfd->fd, (int) getpid());
-	dsu_epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->fd, NULL);
+	if (dsu_sockfd->ev.events != 0) {
+		DSU_DEBUG_PRINT(" - remove %d (%d)\n", dsu_sockfd->fd, (int) getpid());
+		dsu_epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->fd, NULL);
+	}
 	
 
 	/* 	Set shadow file descriptor if needed... */
-	struct epoll_event ev; 
-	ev.events = dsu_sockfd->flags;
+	struct epoll_event ev;
+	memcpy(&ev, &dsu_sockfd->ev, sizeof(struct epoll_event));
     ev.data.fd = dsu_sockfd->shadowfd;
 
 
-	if (dsu_sockfd->monitoring && dsu_sockfd->flags != 0) { 
+	if (dsu_sockfd->monitoring && dsu_sockfd->ev.events != 0) { 
 		
 
 		DSU_DEBUG_PRINT(" < Lock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
@@ -277,27 +286,25 @@ void dsu_epoll_unlock(struct dsu_socket_list *dsu_sockfd) {
 
 void dsu_epoll_originalfd(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 
-	
-	struct epoll_event ev;
-	ev.events = dsu_sockfd->flags;
-	ev.data.fd = dsu_sockfd->fd;
+	if (dsu_sockfd->flags != 0) {
+		struct epoll_event ev;
+		memcpy(&ev, &dsu_sockfd->ev, sizeof(struct epoll_event)); // Set original event.
 
-	
-	dsu_epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->shadowfd, NULL);
-	dsu_epoll_ctl(epollfd, EPOLL_CTL_ADD, dsu_sockfd->fd, &ev);
-	
+		DSU_DEBUG_PRINT(" - %d => %d (%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->fd, (int) getpid());
+		dsu_epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->shadowfd, NULL);
+		dsu_epoll_ctl(epollfd, EPOLL_CTL_ADD, dsu_sockfd->fd, &ev);
+	}
 
 }
 
 
 int dsu_epoll_compress_events(int nfds, struct epoll_event *events) {
 
-
 	/*  Remove file descriptors that are set to -1. */
 	for (int i = 0; i < nfds; i++) {
 		if (events[i].data.fd == -1) {
 			  
-			for(int j = i; j < nfds; j++) {
+			for(int j = i; j < nfds-1; j++) {
 				events[j].events = events[j+1].events;
 				events[j].data = events[j+1].data;
 			}
@@ -307,6 +314,8 @@ int dsu_epoll_compress_events(int nfds, struct epoll_event *events) {
 		}
   	}
 
+	for (int i = 0; i < nfds; i++)
+		DSU_DEBUG_PRINT(" - READ: %d - %d(%d)\n", events[i].data.fd, events[i].events, (int) getpid());
 
 	return nfds;
 
@@ -318,7 +327,7 @@ int dsu_epoll_correct_events(int nfds, struct epoll_event *events) {
 	
 	
 	for(int i = 0; i < nfds; i++) {
-	
+		
 
 		/*	Remove internal connections. */
 		if (dsu_is_internal_conn(events[i].data.fd)	== 1) {
@@ -331,7 +340,6 @@ int dsu_epoll_correct_events(int nfds, struct epoll_event *events) {
 		events[i].data.fd = dsu_originalfd(events[i].data.fd);
 		
 	}
-
 
 	return dsu_epoll_compress_events(nfds, events);
 }
@@ -351,9 +359,11 @@ int dsu_post_epoll(int epollfd, int nfds, struct epoll_event *events) {
 	/*  Change shadow file descripter to its original file descriptor in epoll. */
 	dsu_forall_sockets(dsu_program_state.binds, dsu_epoll_originalfd, epollfd);
 	
-
+	int _nfds = dsu_epoll_correct_events(nfds, events);
+	DSU_DEBUG_PRINT(" nfds: %d -> %d (%d)\n", nfds, _nfds, (int) getpid());
+	
 	/* 	Correct event list. */
-	return dsu_epoll_correct_events(nfds, events);
+	return _nfds;
 
 			
 }
