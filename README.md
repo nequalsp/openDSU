@@ -7,9 +7,9 @@ Run **make build** followed by **make install**, where first both the shared lib
 ### Usage
 Either run your application with
 
-* **LD_PRELOAD=/usr/local/lib/openDSU/libopenDSU.so** (LD_PRELOAD=/usr/local/lib/openDSU/libopenDSU.so ./nginx)
+* **LD_PRELOAD=/usr/local/lib/openDSU/libopenDSU.so** (Ex: LD_PRELOAD=/usr/local/lib/openDSU/libopenDSU.so ./nginx)
 
 or use the executable that does this for you
 
-* **openDSU** (openDSU ./nginx)
+* **openDSU** (Ex: openDSU ./nginx)
 
