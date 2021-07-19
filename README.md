@@ -5,8 +5,11 @@ Update to a different web server without disruption in service (notably Apache, 
 Run **make build** followed by **make install**, where first both the shared library and executable is compiled and then saved in the /usr/local/lib/openDSU and /usr/local/bin/openDSU directory respectively.
 
 ### Usage
-Either run your application with <br/>
+Either run your application with
+
 * **LD_PRELOAD=/usr/local/lib/openDSU/libopenDSU.so** (LD_PRELOAD=/usr/local/lib/openDSU/libopenDSU.so ./nginx)
-or use the executable that does this for you <br/>
+
+or use the executable that does this for you
+
 * **openDSU** (openDSU ./nginx)
 
