@@ -1,0 +1,13 @@
+tests/__pycache__
+tests/version_0/__pycache__
+tests/version_1/__pycache__
+*.o
+*.so
+benchmark/nginx
+benchmark/apache
+benchmark/lighttpd
+benchmark/nginx.o
+benchmark/apache.o
+benchmark/lighttpd.o
+benchmark/etc
+

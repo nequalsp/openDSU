@@ -293,6 +293,32 @@ void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd) {
 }
 
 
+#define DSU_INITIALIZE_EVENT dsu_initialize_event()
+void dsu_initialize_event(void) {
+	
+	/* 	On first call event handler call, mark worker active and configure binded sockets. */
+	if (!dsu_program_state.live) {	
+		
+		dsu_activate_process();
+		dsu_configure_process();
+		
+		/*	Process is initialized. */
+		dsu_program_state.live = 1;
+	}
+	
+	
+	/* 	State handler binded sockets. */
+	dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
+
+	
+	/* 	Termination detection & execution. */
+	if (dsu_termination_detection()) {
+		dsu_terminate();
+	}
+	
+}
+
+
 static __attribute__((constructor)) void dsu_init() {
 	/*	LD_Preload constructor is called before the binary starts. Initialze the program state. */
 	

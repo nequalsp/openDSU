@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <semaphore.h>
+#include <sys/epoll.h>
 
 
 #ifdef DEBUG

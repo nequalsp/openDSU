@@ -61,6 +61,8 @@ void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd);
 void dsu_activate_process(void);
 void dsu_configure_process(void);
 
+#define DSU_INITIALIZE_EVENT dsu_initialize_event()
+void dsu_initialize_event(void);
 
 extern int (*dsu_socket)(int, int, int);
 extern int (*dsu_bind)(int, const struct sockaddr *, socklen_t);
