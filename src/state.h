@@ -35,29 +35,29 @@ struct dsu_socket_list {
 	int fd;
 	struct dsu_fd_list *fds;		// Accepted connections.
     int shadowfd;
-    int port;
+    
+	int port;
 	struct epoll_event ev;			// Needed in Epoll.
     
 
-    /*  Linked list with accepted connections used for communication
-		between different versions. */
-    struct sockaddr_un comfd_addr;
+    struct sockaddr_un comfd_addr;  // Required for accepting internal connections.
+	int comfd;						// File descriptor for listening for internal connections.
 	struct dsu_fd_list *comfds;		// File descriptors of acccepted internal connections.
-    int comfd;						// File descriptor for listening for internal connections.
+    
 	
 
     /*  Status. */
-	int monitoring;
-	int version;
-	int locked;
-	int transfer;
-    int blocking;
+	int monitoring;					// Include or not to include in event handler.
+	int version;					// New or old version.
+	int locked;						// Obtained lock
+	int transfer;					// Is communicating with other version.
+    int blocking;					// Blocking socket.
 	
 
 	/* 	Multi- process & threading. */
-	sem_t *status_sem;
-	sem_t *fd_sem;	
-    int *status;
+	sem_t *fd_sem;		// Exclusive listening on file descriptor.
+	sem_t *status_sem;	// Shared memory write lock.
+    int *status;		// Shared memory.
 
 
 	struct dsu_socket_list *next;
@@ -75,14 +75,17 @@ struct dsu_state_struct {
 
 
     /* Binded ports of the application. */
-    struct dsu_socket_list *sockets;
 	struct dsu_socket_list *binds;
     
 	
-	/* Termination information. */
+	/* Termination information. Marked one if the process calls the event handler. */
 	int live;
-	int *workers;
+
+
+	/*	Communication between processes of the same application using shared memory protected by lock. */
 	sem_t *lock;
+	int *workers;
+	
 
 
 };
@@ -105,7 +108,7 @@ struct dsu_socket_list *dsu_sockets_add(struct dsu_socket_list **head, struct ds
 void dsu_sockets_remove_fd(struct dsu_socket_list **head, int sockfd);
 
 /* 	Transfer file descriptor to different list. */
-struct dsu_socket_list *dsu_sockets_transfer_fd(struct dsu_socket_list **dest, struct dsu_socket_list **src, struct dsu_socket_list *dsu_socketfd);
+//struct dsu_socket_list *dsu_sockets_transfer_fd(struct dsu_socket_list **dest, struct dsu_socket_list **src, struct dsu_socket_list *dsu_socketfd);
 
 /* 	Search for shadow datastructure based on file descriptor. */
 struct dsu_socket_list *dsu_sockets_search_fd(struct dsu_socket_list *head, int fd);

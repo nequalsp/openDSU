@@ -51,12 +51,8 @@ int main (int argc, char **argv) {
 	printf("Start listening on port %d...\n", PORT);
 	while (1)
 	{
-    	//void* libc = dlopen("libc.so.6", RTLD_LAZY);
-    	//original_ioctl = (type_ioctl)dlsym(libc, "ioctl");
-    	//dlclose(libc);
 
-		printf("Start poll()\n");
-        if ( poll(fds, nfds, 500) < 0 ) {
+        if ( poll(fds, nfds, 1000) < 0 ) {
           perror("  poll() failed");
           exit(EXIT_FAILURE);
         }
@@ -64,7 +60,7 @@ int main (int argc, char **argv) {
         _ndfs = nfds;
         for (int i = 0; i < _ndfs; i++)
         {
-          
+
 			if(fds[i].revents == 0)
 				continue;
 

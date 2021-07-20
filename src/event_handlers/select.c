@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <sys/select.h>
+#include <sys/time.h>
 
 #include <netinet/in.h>
 #include <netinet/ip.h>
@@ -14,9 +15,13 @@
 
 
 int (*dsu_select)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
+int (*dsu_pselect)(int, fd_set *, fd_set *, fd_set *, const struct timespec *, const sigset_t *);
+
+
 int correction = 0;
 int max_fds = 0;
 int transfer = 0;
+
 
 void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Listen under the hood to accepted connections on public socket. A new generation can request
@@ -51,27 +56,19 @@ void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 
 
 void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
-	
-    DSU_DEBUG_PRINT(" - Handle on %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+    DSU_DEBUG_PRINT(" - Handle (%d-%d)\n", (int) getpid(), (int) gettid());
 	
 	/*  Race conditions could happend when a "late" fork is performed. The fork happend after 
         accepting dsu communication connection. */
 	if (readfds != NULL && FD_ISSET(dsu_sockfd->comfd, readfds)) {
 		
-		++correction;
+
+		++correction; // Reduction of connections in readfds.
 	
 
-		int size = sizeof(dsu_sockfd->comfd_addr);
-		int acc = dsu_accept4(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size, SOCK_NONBLOCK);
+		dsu_accept_internal_connection(dsu_sockfd);
 		
-		
-		if ( acc != -1) {
-		    DSU_DEBUG_PRINT("  - Accept %d on %d (%d-%d)\n", acc, dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-		    dsu_socket_add_fds(dsu_sockfd, acc, DSU_INTERNAL_FD);
-		} else
-			DSU_DEBUG_PRINT("  - Accept failed (%d-%d)\n", (int) getpid(), (int) gettid());
-			
-		
+
 		DSU_DEBUG_PRINT(" - remove: %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
 		FD_CLR(dsu_sockfd->comfd, readfds);
 	}
@@ -79,8 +76,10 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 
     struct dsu_fd_list *comfds =   dsu_sockfd->comfds;   
    	
+
     while (comfds != NULL) {
     
+
         if (readfds != NULL && FD_ISSET(comfds->fd, readfds)) {
 
 			
@@ -90,65 +89,21 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			
 			++correction;
             
-            int buffer = 0;
-            int port = dsu_sockfd->port;
-            
-            
-            /*  Race condition on recv, hence do not wait, and continue on error. */
-            int r = dsu_recv(comfds->fd, &buffer, sizeof(buffer), MSG_DONTWAIT);
-            
-            
-            /*  Connection is closed by client. */
-            if (r == 0) {
-                
-                DSU_DEBUG_PRINT(" - Close on %d (%d-%d)\n", comfds->fd, (int) getpid(), (int) gettid());
-                                 
-                dsu_close(comfds->fd);
-                FD_CLR(comfds->fd, readfds);
-                
-                struct dsu_fd_list *_comfds = comfds;
-                comfds = comfds->next;
-                dsu_socket_remove_fds(dsu_sockfd, _comfds->fd, DSU_INTERNAL_FD);
-                
-                continue;
-            } 
-            
-            
-            /*  Other process already read message. */
-            else if (r == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-                goto dsu_next_comfd;
-            
-            
-            /*  Unkown error. */
-            else if (r == -1)
-                port = -1;
-            
-            
-			if (port != -1) {
-				
-				DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-				sem_wait(dsu_sockfd->status_sem);
-				DSU_DEBUG_PRINT(" - DSU_TRANSFER %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-				/* Possible multiple processes respond to requests. */
-				if (dsu_sockfd->transfer == 0) {++dsu_sockfd->status[DSU_TRANSFER]; dsu_sockfd->transfer = 1;}
-				DSU_DEBUG_PRINT(" - Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-				sem_post(dsu_sockfd->status_sem);
-				
-			}
+
+			comfds = dsu_respond_internal_connection(dsu_sockfd, comfds);
 
 			
-            DSU_DEBUG_PRINT(" - Send file descriptors on %d (%d-%d)\n", comfds->fd, (int) getpid(), (int) gettid());
-            dsu_write_fd(comfds->fd, dsu_sockfd->shadowfd, port); // handle return value;
-			dsu_write_fd(comfds->fd, dsu_sockfd->comfd, port);
 			
+		
 			
-        }
+        } else {
+
         
-        dsu_next_comfd:
-            comfds = comfds->next;
-                
-    }
+        	comfds = comfds->next;
 
+
+		}       
+    }
 }
 
 
@@ -228,8 +183,8 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 }
 
 
-int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
-	DSU_DEBUG_PRINT("Select(%d, set, set, set, timeout) (%d-%d)\n", nfds, (int) getpid(), (int) gettid());
+int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, const struct timespec *timeout, const sigset_t *sigmask) {
+	DSU_DEBUG_PRINT("pselect(%d, set, set, set, timeout) (%d-%d)\n", nfds, (int) getpid(), (int) gettid());
     /*  Select() allows a program to monitor multiple file descriptors, waiting until one or more of the file descriptors 
         become "ready". The DSU library will modify this list by removing file descriptors that are transfered, and change
         file descriptors to their shadow file descriptors. */
@@ -241,6 +196,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	fd_set original_writefds; if (writefds != NULL) original_writefds = *writefds;
     fd_set original_exceptfds; if (exceptfds != NULL) original_exceptfds = *exceptfds;
 	
+
     /*  It might be necessary to increase the maximum file descriptors that need to be monitored. */
 	max_fds = nfds;
 
@@ -258,24 +214,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	#endif
 	
 
-	/* 	On first call to select, mark worker active and configure binded sockets. */
-	if (!dsu_program_state.live) {	
-		
-		dsu_activate_process();
-		dsu_configure_process();
-		
-		/*	Process is initialized. */
-		dsu_program_state.live = 1;
-	}
-	
-
-	/* 	Mark version of the file descriptors. */
-	dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
-    
-
-	if (dsu_termination_detection()) {
-		dsu_terminate();
-	}
+	DSU_INITIALIZE_EVENT;
 	
 
     /*  Convert to shadow file descriptors, this must be done for binded sockets. */
@@ -287,9 +226,11 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 
 
 	/* To support non-blocking sockets, narrow down the time between locks. */
-	struct timeval tv; struct timeval *ptv = &tv;
-	if (transfer == 1) {tv.tv_sec = 0; tv.tv_usec = 100;}
-	else {ptv = timeout;}
+	const struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000 /* 100 microseconds (usec). */ };
+	const struct timespec *pts = timeout;
+	if (transfer == 1 && timeout == NULL) {
+		pts = &ts;
+	}
 
 
 	#if DSU_DEBUG == 1
@@ -301,7 +242,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	#endif
 
 
-    int result = dsu_select(max_fds, readfds, writefds, exceptfds, ptv);
+    int result = dsu_pselect(max_fds, readfds, writefds, exceptfds, pts, sigmask);
     if (result == -1) {
 		DSU_DEBUG_PRINT(" - error: (%d-%d)\n", (int) getpid(), (int) gettid());
 		return result;
@@ -339,7 +280,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 		if (exceptfds != NULL) *exceptfds = original_exceptfds;
 
 
-		return select(nfds, readfds, writefds, exceptfds, NULL);
+		return dsu_pselect(nfds, readfds, writefds, exceptfds, NULL, NULL);
 
 	}
 
@@ -355,3 +296,20 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	
 	return result - _correction;
 }
+
+
+int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struct timeval *timeout) {
+	DSU_DEBUG_PRINT("Select() (%d)\n", (int) getpid());
+
+
+	struct timespec ts; struct timespec *pts = NULL;
+	if (timeout != NULL) {
+		TIMEVAL_TO_TIMESPEC(timeout, &ts);
+		pts = &ts;
+	}
+
+
+	return pselect(nfds, readfds, writefds, exceptfds, pts, NULL);
+	
+}
+

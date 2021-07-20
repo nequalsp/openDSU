@@ -2,14 +2,6 @@
 #define DSU_UTILS
 
 
-int fcntl(int fd, int cmd, char *argp);
-extern int (*dsu_fcntl)(int, int, char *);
-
-
-int ioctl(int fd, unsigned long request, char *argp);
-extern int (*dsu_ioctl)(int, unsigned long, char *);
-
-
 int getsockopt(int sockfd, int level, int optname, void *restrict optval, socklen_t *restrict optlen);
 extern int (*dsu_getsockopt)(int, int, int, void *restrict, socklen_t *restrict);
 

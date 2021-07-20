@@ -66,7 +66,7 @@ int main (int argc, char **argv) {
 
 	
    for (;;) {
-		
+	
        nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
        if (nfds == -1) {
            perror("epoll_wait");
@@ -74,7 +74,7 @@ int main (int argc, char **argv) {
        }
 
        for (int n = 0; n < nfds; ++n) {
-
+			
 			if (events[n].events == 0) continue;
 			
 			if (events[n].data.fd == sock) {
@@ -84,6 +84,7 @@ int main (int argc, char **argv) {
 	            	perror("accept");
 	           		exit(EXIT_FAILURE);
 	           	}
+
 	           	ev.events = EPOLLIN;
 	           	ev.data.fd = conn_sock;
 	           	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, conn_sock, &ev) == -1) {
@@ -98,6 +99,7 @@ int main (int argc, char **argv) {
 				nbytes = read(events[n].data.fd, buffer, MAXMSG);
 				if (nbytes < 0) {
 					/* Read error. */
+					printf("fd: %d\n", events[n].data.fd);
 					perror("Error reading message");
 					exit(EXIT_FAILURE);
 				} else if (nbytes == 0) {

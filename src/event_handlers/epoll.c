@@ -12,6 +12,7 @@
 
 
 int (*dsu_epoll_wait)(int, struct epoll_event *, int, int);
+int (*dsu_epoll_pwait)(int, struct epoll_event *, int, int, const sigset_t *);
 int (*dsu_epoll_create1)(int);
 int (*dsu_epoll_create)(int);
 int (*dsu_epoll_ctl)(int, int, int, struct epoll_event *);
@@ -104,21 +105,13 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 		/* 	Accept connection requests. */
 		if (events[i].data.fd == dsu_sockfd->comfd) {
 
-
-			/*  Race conditions could happend when a "late" fork is performed. The fork happend after 
-        		accepting dsu communication connection. */
-			int size = sizeof(dsu_sockfd->comfd_addr);
-			int acc = dsu_accept4(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size, SOCK_NONBLOCK);
 			
+			dsu_accept_internal_connection(dsu_sockfd);
 
-			if ( acc != -1) {
-				DSU_DEBUG_PRINT("  - Accept %d on %d (%d)\n", acc, dsu_sockfd->comfd, (int) getpid());
-				dsu_socket_add_fds(dsu_sockfd, acc, DSU_INTERNAL_FD);
-			} else
-				DSU_DEBUG_PRINT("  - Accept failed (%d)\n", (int) getpid());
+			
+			/* Remove from the event list, mark them -1. */
+			events[i].data.fd = -1;
 
-
-			continue;
 		
 		}
 	
@@ -131,65 +124,19 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 			if (events[i].data.fd == comfds->fd) {
 				
 		        
-		        int buffer = 0;
-		        int port = dsu_sockfd->port;
-		        
-		        
-		        /*  Race condition on recv, hence do not wait, and continue on error. */
-		        int r = dsu_recv(comfds->fd, &buffer, sizeof(buffer), MSG_DONTWAIT);
-		        
-		        
-		        /*  Connection is closed by client. */
-		        if (r == 0) {
-		            
-		            DSU_DEBUG_PRINT(" - Close on %d (%d)\n", comfds->fd, (int) getpid());            
-		            dsu_close(comfds->fd);
-					events[i].data.fd = -1; // Mark to be removed.
-					dsu_epoll_ctl(epollfd, EPOLL_CTL_DEL, comfds->fd, NULL);		            
+		        comfds = dsu_respond_internal_connection(dsu_sockfd, comfds);
 
-		            struct dsu_fd_list *_comfds = comfds;
-		            comfds = comfds->next;
-		            dsu_socket_remove_fds(dsu_sockfd, _comfds->fd, DSU_INTERNAL_FD);
-		            
-		            continue;
-		        } 
-		        
-		        
-		        /*  Other process already read message. */
-		        else if (r == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-		            goto dsu_next_comfd;
-		        
-		        
-		        /*  Unkown error. */
-		        else if (r == -1)
-		            port = -1;
-		        
-		        
-				if (port != -1) {
-					
-					DSU_DEBUG_PRINT(" < Lock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
-					sem_wait(dsu_sockfd->status_sem);
-					
-					DSU_DEBUG_PRINT(" - DSU_TRANSFER %d (%d)\n", dsu_sockfd->port, (int) getpid());
-					/* Possible multiple processes respond to requests. */
-					if (dsu_sockfd->transfer == 0) {++dsu_sockfd->status[DSU_TRANSFER]; dsu_sockfd->transfer = 1;}
-					
-					DSU_DEBUG_PRINT(" > Unlock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
-					sem_post(dsu_sockfd->status_sem);
-					
-				}
 
-				
-		        DSU_DEBUG_PRINT(" - Send file descriptors on %d (%d)\n", comfds->fd, (int) getpid());
-		        dsu_write_fd(comfds->fd, dsu_sockfd->shadowfd, port); // handle return value;
-				dsu_write_fd(comfds->fd, dsu_sockfd->comfd, port);
+				/* Remove from the event list, mark them -1. */
+				events[i].data.fd = -1;
 				
 				
-		    }
+		    } else {
 		    
-		    dsu_next_comfd:
-		        comfds = comfds->next;
-		            
+
+		    	comfds = comfds->next;
+
+			}        
 		}
 	}
 }
@@ -300,8 +247,8 @@ int dsu_epoll_correct_events(int nfds, struct epoll_event *events) {
 	for(int i = 0; i < nfds; i++) {
 		
 
-		/*	Remove internal connections from the event list. */
-		if (dsu_is_internal_conn(events[i].data.fd)	== 1) {
+		/*	Remove internal connections from the event list. These are marked -1.*/
+		if (events[i].data.fd == -1) {
 			
 			for(int j = i; j < nfds-1; j++) {
 				events[j].events = events[j+1].events;
@@ -356,12 +303,12 @@ int dsu_post_epoll(int epollfd, int nfds, struct epoll_event *events) {
 }
 
 
-int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout) {
+int epoll_pwait(int epfd, struct epoll_event *events, int maxevents, int timeout, const sigset_t *sigmask) {
+	DSU_DEBUG_PRINT("epoll_pwait() (%d)\n", (int) getpid());
 	/* 	The epoll_wait() system call waits for events on the epoll(7) instance referred to by the file descriptor epfd.  The buffer
 		pointed to by events is used to return information from the ready list about file descriptors in the interest list that have some
        	events available.  Up to maxevents are returned by epoll_wait(). The maxevents argument must be greater than zero. */
-	DSU_DEBUG_PRINT(" Epoll_wait() (%d)\n", (int) getpid());
-
+	
 
 	DSU_INITIALIZE_EVENT;
 
@@ -370,7 +317,7 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 	dsu_pre_epoll(epfd);
 
 
-	int nfds = dsu_epoll_wait(epfd, events, maxevents, timeout);
+	int nfds = dsu_epoll_pwait(epfd, events, maxevents, timeout, sigmask);
 
 
 	/*	Translate epoll response. */
@@ -379,3 +326,26 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 
 	return nfds;
 }
+
+
+int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout) {
+	DSU_DEBUG_PRINT("epoll_wait() (%d)\n", (int) getpid());
+	return epoll_pwait(epfd, events, maxevents, timeout, NULL);
+}
+
+
+int epoll_pwait2(int epfd, struct epoll_event *events, int maxevents, const struct timespec *timeout, const sigset_t *sigmask) {
+	DSU_DEBUG_PRINT("epoll_pwait2() (%d)\n", (int) getpid());
+	
+	
+	/* 	Convert time to miliseconds. */
+	int ts = timeout->tv_sec * 1000 + timeout->tv_nsec / 1000000;
+	
+
+	return epoll_pwait(epfd, events, maxevents, ts, NULL);
+}
+
+
+
+
+

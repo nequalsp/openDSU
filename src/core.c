@@ -57,6 +57,8 @@ int (*dsu_close)(int);
 int (*dsu_dup)(int);
 int (*dsu_dup2)(int, int);
 int (*dsu_dup3)(int, int, int);
+int (*dsu_fcntl)(int, int, char *);
+int (*dsu_ioctl)(int, unsigned long, char *);
 ssize_t (*dsu_read)(int, void *, size_t);
 ssize_t (*dsu_recv)(int, void *, size_t, int);
 ssize_t (*dsu_recvfrom)(int, void *restrict, size_t, int, struct sockaddr *restrict, socklen_t *restrict);
@@ -195,7 +197,6 @@ void dsu_activate_process(void) {
 
 
 void dsu_configure_process(void) {
-	
 	dsu_forall_sockets(dsu_program_state.binds, dsu_configure_socket);
 }
 
@@ -279,17 +280,15 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 int dsu_is_blocking(int fd) {
     
     int flags = dsu_fcntl(fd, F_GETFL, 0);
-    if ( (flags & O_NONBLOCK) ) return 0;
-
+    if ( !(flags & O_NONBLOCK) ) return 0;
+	
     return 1;
 
 }
 
 
 void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd) {
-
     dsu_sockfd->blocking = dsu_is_blocking(dsu_sockfd->shadowfd);
-    
 }
 
 
@@ -319,6 +318,88 @@ void dsu_initialize_event(void) {
 }
 
 
+void dsu_accept_internal_connection(struct dsu_socket_list *dsu_sockfd) {
+	
+	int size = sizeof(dsu_sockfd->comfd_addr);
+	int acc = dsu_accept4(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size, SOCK_NONBLOCK);
+		
+		
+	if ( acc != -1) {
+	    DSU_DEBUG_PRINT("  - Accept %d on %d (%d-%d)\n", acc, dsu_sockfd->comfd, (int) getpid(), (int) gettid());
+	    dsu_socket_add_fds(dsu_sockfd, acc, DSU_INTERNAL_FD);
+	} else
+		DSU_DEBUG_PRINT("  - Accept failed (%d-%d)\n", (int) getpid(), (int) gettid());
+	
+}
+
+
+struct dsu_fd_list *dsu_respond_internal_connection(struct dsu_socket_list *dsu_sockfd, struct dsu_fd_list *comfds) {
+
+	
+	int buffer = 0;
+    int port = dsu_sockfd->port;
+    
+    
+    /*  Race condition on recv, hence do not wait, and continue on error. */
+    int r = dsu_recv(comfds->fd, &buffer, sizeof(buffer), MSG_DONTWAIT);
+    
+    
+    /*  Connection is closed by client. */
+    if (r == 0) {
+        
+        DSU_DEBUG_PRINT(" - Close on %d (%d)\n", comfds->fd, (int) getpid());            
+        dsu_close(comfds->fd);
+        
+        struct dsu_fd_list *_comfds = comfds;
+        comfds = comfds->next;
+        dsu_socket_remove_fds(dsu_sockfd, _comfds->fd, DSU_INTERNAL_FD);
+        
+		return comfds;
+    } 
+    
+    
+    /*  Other process already read message. */
+    else if (r == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        return comfds = comfds->next;
+    
+    
+    /*  Unkown error. */
+    else if (r == -1) {
+        port = -1;
+    }
+    
+
+	if (port != -1) {
+		
+
+		DSU_DEBUG_PRINT(" < Lock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
+		sem_wait(dsu_sockfd->status_sem);
+		
+
+		DSU_DEBUG_PRINT(" - DSU_TRANSFER %d (%d)\n", dsu_sockfd->port, (int) getpid());
+		/* Possible multiple processes respond to requests. */
+		if (dsu_sockfd->transfer == 0) {
+			++dsu_sockfd->status[DSU_TRANSFER]; 
+			dsu_sockfd->transfer = 1;
+		}
+		
+
+		DSU_DEBUG_PRINT(" > Unlock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
+		sem_post(dsu_sockfd->status_sem);
+		
+	}
+
+
+	DSU_DEBUG_PRINT(" - Send file descriptors on %d (%d-%d)\n", comfds->fd, (int) getpid(), (int) gettid());
+    dsu_write_fd(comfds->fd, dsu_sockfd->shadowfd, port); 	// Listening socket.
+	dsu_write_fd(comfds->fd, dsu_sockfd->comfd, port); 		// Internal socket.
+
+	
+	return comfds = comfds->next;
+}
+
+
+
 static __attribute__((constructor)) void dsu_init() {
 	/*	LD_Preload constructor is called before the binary starts. Initialze the program state. */
 	
@@ -336,7 +417,6 @@ static __attribute__((constructor)) void dsu_init() {
 	DSU_DEBUG_PRINT("INIT() (%d-%d)\n", (int) getpid(), (int) gettid());
 
 
-    dsu_program_state.sockets = NULL;
     dsu_program_state.binds = NULL;
 
 			
@@ -384,7 +464,11 @@ static __attribute__((constructor)) void dsu_init() {
 	
 	/*  Wrappers around system function. RTLD_NEXT will find the next occurrence of a function in the search 
 		order after the current library*/
+
+	#if DSU_DEBUG == 1
 	dsu_socket = dlsym(RTLD_NEXT, "socket");
+	#endif
+
 	dsu_bind = dlsym(RTLD_NEXT, "bind");
 	dsu_listen = dlsym(RTLD_NEXT, "listen");
 	dsu_accept = dlsym(RTLD_NEXT, "accept");
@@ -409,14 +493,14 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_sendto = dlsym(RTLD_NEXT, "sendto");
 	dsu_sendmsg = dlsym(RTLD_NEXT, "sendmsg");
 
-	dsu_open = dlsym(RTLD_NEXT, "open");
-	dsu_creat = dlsym(RTLD_NEXT, "creat");
 
 	/* 	Set default function for event-handler wrapper functions. */
 	dsu_select = dlsym(RTLD_NEXT, "select");
+	dsu_pselect = dlsym(RTLD_NEXT, "pselect");
 	dsu_poll = dlsym(RTLD_NEXT, "poll");
 	dsu_ppoll = dlsym(RTLD_NEXT, "ppoll");
 	dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
+	dsu_epoll_pwait = dlsym(RTLD_NEXT, "epoll_pwait");
 	dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
 	dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
 	dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
@@ -483,26 +567,12 @@ int sigaction(int signum, const struct sigaction *restrict act, struct sigaction
 */
 
 
+#if DSU_DEBUG == 1
 int socket(int domain, int type, int protocol) {
     DSU_DEBUG_PRINT("Socket() (%d-%d)\n", (int) getpid(), (int) gettid());
-    /*  With socket() an endpoint for communication is created and returns a file descriptor that refers to that 
-        endpoint. The DSU library will connect the file descriptor to a shadow file descriptor. The shadow file 
-        descriptor may be recieved from running version. */
-
-	
-    int sockfd = dsu_socket(domain, type, protocol);
-    if (sockfd > 0) {
-        /* After successfull creation, add socket to the DSU state. */
-        struct dsu_socket_list dsu_socket;
-        dsu_socket_list_init(&dsu_socket);
-        dsu_socket.shadowfd = dsu_socket.fd = sockfd;
-        dsu_sockets_add(&dsu_program_state.sockets, &dsu_socket);
-    }
-	
-	DSU_DEBUG_PRINT(" - fd: %d(%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
-    
-    return sockfd;
+    return dsu_socket(domain, type, protocol);
 }
+#endif
 
 
 int dup(int oldfd) {
@@ -525,30 +595,7 @@ int dup3(int oldfd, int newfd, int flags) {
 }
 
 
-/*int open(const char *pathname, int flags, ...) {
-	DSU_DEBUG_PRINT("Open() %s (%d-%d)\n", pathname, (int) getpid(), (int) gettid());
-	
-	int mode = 0;
-    if (flags & (O_CREAT|O_TMPFILE))
-    {
-		va_list args;
-    	va_start(args, flags);
-		mode = va_arg(args, int);
-		va_end(args);
-	}
 
-	
-	return dsu_open(pathname, flags, mode);
-}*/
-
-
-int creat(const char *pathname, mode_t mode) {
-	DSU_DEBUG_PRINT("creat() %s (%d-%d)\n", pathname, (int) getpid(), (int) gettid());
-	return dsu_creat(pathname, mode);
-}
-
-
-// For udp
 ssize_t read(int fd, void *buf, size_t count) {
 	DSU_DEBUG_PRINT("read() %d -> %d (%d-%d)\n", fd, dsu_shadowfd(fd), (int) getpid(), (int) gettid());
 	return dsu_read(dsu_shadowfd(fd), buf, count);
@@ -598,45 +645,40 @@ ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags) {
 
 
 int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
-    DSU_DEBUG_PRINT("Bind() (%d-%d)\n", (int) getpid(), (int) gettid());
+    DSU_DEBUG_PRINT("Bind(%d, addr, len) (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
     /*  Bind is used to accept a client connection on an socket, this means it is a "public" socket 
         that is ready to accept requests. */
     
 	
-    /* Find the metadata of sockfd, and transfer the socket to the state binds. */
-    struct dsu_socket_list *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd); 
-    if (dsu_socketfd == NULL) {
-        /*  The socket was not correctly captured in the socket() call. Therefore, we need to return
-            error that socket is not correct. On error, -1 is returned, and errno is set to indicate 
-            the error. */
-        errno = EBADF;
-        return -1;
-    }
+	/* 	Initialize the shadow data structure. */
+	struct dsu_socket_list dsu_socketfd;
+    dsu_socket_list_init(&dsu_socketfd);
+    dsu_socketfd.shadowfd = dsu_socketfd.fd = sockfd;
     
     
     /*  To be able to map a socket to the correct socket in the new version the port must be known. 
         therefore we assume it is of the form sockaddr_in. This assumption must be solved and is still
         TO DO. */
     struct sockaddr_in *addr_t; addr_t = (struct sockaddr_in *) addr;
-    dsu_socketfd->port = ntohs(addr_t->sin_port);
-    
+    dsu_socketfd.port = ntohs(addr_t->sin_port);
+	DSU_DEBUG_PRINT(" - port %d (%d-%d)\n", dsu_socketfd.port, (int) getpid(), (int) gettid());    
+
     
     /*  Possibly communicate the socket from the older version. A bind can only be performed once on the same
         socket, therefore, processes will not communicate with each other. Abstract domain socket cannot be used 
-        in portable programs. But has the advantage that it automatically disappear when all open references to 
+        in portable programs and has the advantage that it automatically disappear when all open references to 
         the socket are closed. */
-    bzero(&dsu_socketfd->comfd_addr, sizeof(dsu_socketfd->comfd_addr));
-    dsu_socketfd->comfd_addr.sun_family = AF_UNIX;
-    sprintf(dsu_socketfd->comfd_addr.sun_path, "X%s_%d.unix", DSU_COMM, dsu_socketfd->port);    // On Linux, sun_path is 108 bytes in size.
-    dsu_socketfd->comfd_addr.sun_path[0] = '\0';                                                // Abstract linux socket.
-    dsu_socketfd->comfd = dsu_socket(AF_UNIX, SOCK_STREAM, 0);
-    DSU_DEBUG_PRINT(" - Bind port %d on %d (%d-%d)\n", dsu_socketfd->port, sockfd, (int) getpid(), (int) gettid());
-    
+    bzero(&dsu_socketfd.comfd_addr, sizeof(dsu_socketfd.comfd_addr));
+    dsu_socketfd.comfd_addr.sun_family = AF_UNIX;
+    sprintf(dsu_socketfd.comfd_addr.sun_path, "X%s_%d.unix", DSU_COMM, dsu_socketfd.port);    // On Linux, sun_path is 108 bytes in size.
+    dsu_socketfd.comfd_addr.sun_path[0] = '\0';                                                // Abstract linux socket.
+    dsu_socketfd.comfd = dsu_socket(AF_UNIX, SOCK_STREAM, 0);
+        
     
     /*  To communicate the status between the process, shared memory is used. */
-    int pathname_size = snprintf(NULL, 0, "/%s_%d", DSU_COMM, dsu_socketfd->port);
+    int pathname_size = snprintf(NULL, 0, "/%s_%d", DSU_COMM, dsu_socketfd.port);
     char pathname[pathname_size+1];
-    sprintf(pathname, "/%s_%d", DSU_COMM, dsu_socketfd->port);
+    sprintf(pathname, "/%s_%d", DSU_COMM, dsu_socketfd.port);
 	
 	int shfd = shm_open(pathname, O_CREAT | O_RDWR , O_RDWR);
 	if (shfd == -1) {
@@ -649,89 +691,92 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 		exit(EXIT_FAILURE);
 	}
 	
-	dsu_socketfd->status = (int *) mmap(NULL, 3*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
-	if (dsu_socketfd->status == (void *) -1) {
+	dsu_socketfd.status = (int *) mmap(NULL, 3*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
+	if (dsu_socketfd.status == (void *) -1) {
 		perror("DSU \"Error creating shared memory\"");
 		exit(EXIT_FAILURE);
 	}
 
 	
-	/*  During the transition a lock is needed when the accepting file descriptor is blocking. */
-    int pathname_size_status_sem = snprintf(NULL, 0, "/%s_%d_status.semaphore", DSU_COMM, dsu_socketfd->port);
+	/*  Multiple threads/processes write to the same memory, hence, protected by lock. */
+    int pathname_size_status_sem = snprintf(NULL, 0, "/%s_%d_status.semaphore", DSU_COMM, dsu_socketfd.port);
     char pathname_status_sem[pathname_size_status_sem+1];
-    sprintf(pathname_status_sem, "%s_%d", DSU_COMM, dsu_socketfd->port);
+    sprintf(pathname_status_sem, "%s_%d", DSU_COMM, dsu_socketfd.port);
 
 
-	/*  During the transition a lock is needed. */
-    int pathname_size_fd_sem = snprintf(NULL, 0, "/%s_%d_key.semaphore", DSU_COMM, dsu_socketfd->port);
+	/*  When the accepting file descriptor is blocking, locks are required to avoid deadlocks in read(), write() 
+		and accept() function calls. */
+    int pathname_size_fd_sem = snprintf(NULL, 0, "/%s_%d_key.semaphore", DSU_COMM, dsu_socketfd.port);
     char pathname_fd_sem[pathname_size_fd_sem+1];
-    sprintf(pathname_fd_sem, "%s_%d", DSU_COMM, dsu_socketfd->port);
+    sprintf(pathname_fd_sem, "%s_%d", DSU_COMM, dsu_socketfd.port);
 
     
     /*  Bind socket, if it fails and already exists we know that another DSU application is 
         already running. These applications need to know each others listening ports. */
-    if ( dsu_monitor_init(dsu_socketfd) == -1) {
+    if ( dsu_monitor_init(&dsu_socketfd) == -1) {
 		
         if ( errno == EADDRINUSE ) {
 
-            if (dsu_inherit_fd(dsu_socketfd) > 0) {
+            if (dsu_inherit_fd(&dsu_socketfd) > 0) {
                 
-				dsu_socketfd->monitoring = 1; // Communication file descriptor is inherited.
+				dsu_socketfd.monitoring = 1; // Start listening after inheriting the file descriptor.
 				
-				dsu_socketfd->status_sem = sem_open(pathname_status_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-				dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+				dsu_socketfd.status_sem = sem_open(pathname_status_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+				dsu_socketfd.fd_sem = sem_open(pathname_fd_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
 				
-				DSU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
-				if (sem_wait(dsu_socketfd->status_sem) == 0) {
+				DSU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd.port, (int) getpid(), (int) gettid());
+				if (sem_wait(dsu_socketfd.status_sem) == 0) {
 					
-					dsu_socketfd->version = dsu_socketfd->status[DSU_VERSION];
+					dsu_socketfd.version = dsu_socketfd.status[DSU_VERSION];
 					
 					/* 	Could be a delayed process. */
-					if(dsu_socketfd->status[DSU_PGID] != getpgid(getpid())) 
-						++dsu_socketfd->version;
-					DSU_DEBUG_PRINT(" - version %d (%d-%d)\n", dsu_socketfd->version, (int) getpid(), (int) gettid());
+					if(dsu_socketfd.status[DSU_PGID] != getpgid(getpid())) 
+						++dsu_socketfd.version;
+					DSU_DEBUG_PRINT(" - version %d (%d-%d)\n", dsu_socketfd.version, (int) getpid(), (int) gettid());
 					
-					DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
-					sem_post(dsu_socketfd->status_sem);
+					DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd.port, (int) getpid(), (int) gettid());
+					sem_post(dsu_socketfd.status_sem);
 				
 				}
 				
-                dsu_sockets_transfer_fd(&dsu_program_state.binds, &dsu_program_state.sockets, dsu_socketfd);
+                dsu_sockets_add(&dsu_program_state.binds, &dsu_socketfd);
                 				
                 return 0;
             }
         }
     }
     
+	
 	/*	No other version running. */
 		 	
 	sem_unlink(pathname_status_sem); // Semaphore does not terminate after exit.
-    dsu_socketfd->status_sem = sem_open(pathname_status_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-    sem_init(dsu_socketfd->status_sem, PTHREAD_PROCESS_SHARED, 1);
+    dsu_socketfd.status_sem = sem_open(pathname_status_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+    sem_init(dsu_socketfd.status_sem, PTHREAD_PROCESS_SHARED, 1);
 
 	
 	sem_unlink(pathname_fd_sem); // Semaphore does not terminate after exit.
-    dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-    sem_init(dsu_socketfd->fd_sem, PTHREAD_PROCESS_SHARED, 1);
+    dsu_socketfd.fd_sem = sem_open(pathname_fd_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+    sem_init(dsu_socketfd.fd_sem, PTHREAD_PROCESS_SHARED, 1);
 
 
-	dsu_socketfd->monitoring = 1;
+	dsu_socketfd.monitoring = 1;
 	
 
-	DSU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
-	if (sem_wait(dsu_socketfd->status_sem) == 0) {
+	DSU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd.port, (int) getpid(), (int) gettid());
+	if (sem_wait(dsu_socketfd.status_sem) == 0) {
 		
-		dsu_socketfd->status[DSU_PGID] = getpgid(getpid());
-		dsu_socketfd->version = dsu_socketfd->status[DSU_VERSION] = 0;
-		dsu_socketfd->status[DSU_TRANSFER] = 0;
-		dsu_socketfd->transfer = 0;	
+		dsu_socketfd.status[DSU_PGID] = getpgid(getpid());
+		dsu_socketfd.version = dsu_socketfd.status[DSU_VERSION] = 0;
+		dsu_socketfd.status[DSU_TRANSFER] = 0;
+		dsu_socketfd.transfer = 0;	
 		
-		DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
-		sem_post(dsu_socketfd->status_sem);
+		DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd.port, (int) getpid(), (int) gettid());
+		sem_post(dsu_socketfd.status_sem);
 	}
 	
 	
-    dsu_sockets_transfer_fd(&dsu_program_state.binds, &dsu_program_state.sockets, dsu_socketfd);
+	dsu_sockets_add(&dsu_program_state.binds, &dsu_socketfd);
+
   	
     
     return dsu_bind(sockfd, addr, addrlen);
@@ -750,7 +795,7 @@ int listen(int sockfd, int backlog) {
 
 
 int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
-	DSU_DEBUG_PRINT("Accept() (%d-%d)\n", (int) getpid(), (int) gettid());   
+	DSU_DEBUG_PRINT("Accept(%d, addr, len, flags) (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());   
     /*  The accept() system call is used with connection-based socket types (SOCK_STREAM, SOCK_SEQPACKET).  It extracts the first
         connection request on the queue of pending connections for the listening socket, sockfd, creates a new connected socket, and
         returns a new file descriptor referring to that socket. The DSU library need to convert the file descriptor to the shadow
@@ -761,9 +806,11 @@ int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrl
     int sessionfd = dsu_accept(shadowfd, addr, addrlen);
 	if (sessionfd == -1)
 		return sessionfd;
+
 	
     DSU_DEBUG_PRINT(" - accept %d (%d-%d)\n", sessionfd, (int) getpid(), (int) gettid());
     
+
 	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
 	
 	if (dsu_sockfd != NULL)
@@ -774,7 +821,7 @@ int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrl
 
 
 int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags) {
-	DSU_DEBUG_PRINT("Accept4() (%d-%d)\n", (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT("Accept4(%d, addr, len, flags) (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
     /*  For more information see dsu_accept(). */     
     
     int shadowfd = dsu_shadowfd(sockfd);
@@ -786,7 +833,8 @@ int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addr
     DSU_DEBUG_PRINT(" - accept %d (%d-%d)\n", sessionfd, (int) getpid(), (int) gettid());
     
 	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
-	
+
+
 	if (dsu_sockfd != NULL)
 		dsu_socket_add_fds(dsu_sockfd, sessionfd, DSU_NON_INTERNAL_FD);
     
@@ -804,7 +852,6 @@ int close(int sockfd) {
 	DSU_DEBUG_PRINT("Close() fd: %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
 	/*	close() closes a file descriptor, so that it no longer refers to any file and may be reused. Therefore, the the shadow file descriptor
 		should also be removed / closed. The file descriptor can exist in:
-			1.	Unbinded sockets 	-> 	dsu_program_State.sockets
 			2.	Binded sockets 		-> 	dsu_program_State.binds
 			3.	Internal sockets	-> 	dsu_program_State.binds->comfd | dsu_program_State.binds->fds
 			4.	Connected clients	-> 	dsu_program_state.accepted	*/
@@ -814,17 +861,9 @@ int close(int sockfd) {
     if (sockfd == STDIN_FILENO || sockfd == STDOUT_FILENO || sockfd == STDERR_FILENO) {
         return dsu_close(sockfd);
     }
-	
-	
-	struct dsu_socket_list * dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd);
-    if (dsu_socketfd != NULL) {
-		DSU_DEBUG_PRINT(" - Unbinded socket (%d-%d)\n", (int) getpid(), (int) gettid());
-		dsu_sockets_remove_fd(&dsu_program_state.sockets, sockfd);
-		return dsu_close(sockfd);
-	}
 
 
-	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
+	struct dsu_socket_list *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
 	if (dsu_socketfd != NULL) {
 		DSU_DEBUG_PRINT(" - Binded socket %d=%d (%d-%d)\n",dsu_socketfd->fd, dsu_socketfd->shadowfd, (int) getpid(), (int) gettid());
 		dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
@@ -860,3 +899,18 @@ int close(int sockfd) {
 
 }
 
+/* The prototype stands out in the list of Unix system calls because of the dots, which usually mark the function as having a variable number of arguments. In a real system, however, a system call can't actually have a variable number of arguments. System calls must have a well-defined prototype, because user programs can access them only through hardware "gates." Therefore, the dots in the prototype represent not a variable number of arguments but a single optional argument, traditionally identified as char *argp. The dots are simply there to prevent type checking during compilation. */
+int fcntl(int fd, int cmd, char *argp) {
+	DSU_DEBUG_PRINT("fcntl() fd: %d (%d)\n", fd, (int) getpid());
+	int v = dsu_fcntl(dsu_shadowfd(fd), cmd, argp);
+	DSU_DEBUG_PRINT(" - return: %d (%d)\n", v, (int) getpid());
+	if (cmd == F_DUPFD) DSU_DEBUG_PRINT(" - DUP (%d)\n", (int) getpid()); //|| cmd == F_DUPFD_CLOEXEC
+	return v;
+}
+
+
+int ioctl(int fd, unsigned long request, char *argp) {
+	DSU_DEBUG_PRINT("ioctl() (%d)\n", (int) getpid());
+
+	return dsu_ioctl(dsu_shadowfd(fd), request, argp);
+}

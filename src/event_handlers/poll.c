@@ -76,16 +76,13 @@ void dsu_sniff_conn_poll(struct dsu_socket_list *dsu_sockfd, struct pollfd *fds,
 
 
 void dsu_handle_conn_poll(struct dsu_socket_list *dsu_sockfd, struct pollfd *fds, nfds_t start, nfds_t end) {
-	DSU_DEBUG_PRINT(" - Handle on %d %lu, %lu(%d)\n", dsu_sockfd->port, start, end, (int) getpid());
+	DSU_DEBUG_PRINT(" - Handle on %d (%d)\n", dsu_sockfd->port, (int) getpid());
 
 	
 	for(int i = start; i < end; i++) {
 
 
 		if (fds[i].revents == 0) continue;
-
-
-		DSU_DEBUG_PRINT("  - %d (%d)\n", fds[i].fd, (int) getpid());
 
 		
 		++correction;
@@ -95,18 +92,7 @@ void dsu_handle_conn_poll(struct dsu_socket_list *dsu_sockfd, struct pollfd *fds
 		if (fds[i].fd == dsu_sockfd->comfd) {
 
 
-			/*  Race conditions could happend when a "late" fork is performed. The fork happend after 
-        		accepting dsu communication connection. */
-			int size = sizeof(dsu_sockfd->comfd_addr);
-			int acc = dsu_accept4(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size, SOCK_NONBLOCK);
-			
-			if ( acc != -1) {
-				DSU_DEBUG_PRINT("  - Accept %d on %d (%d)\n", acc, dsu_sockfd->comfd, (int) getpid());
-				dsu_socket_add_fds(dsu_sockfd, acc, DSU_INTERNAL_FD);
-			} else
-				DSU_DEBUG_PRINT("  - Accept failed (%d)\n", (int) getpid());
-
-			continue;
+			dsu_accept_internal_connection(dsu_sockfd);
 		
 		}
 	
@@ -119,63 +105,15 @@ void dsu_handle_conn_poll(struct dsu_socket_list *dsu_sockfd, struct pollfd *fds
 			if (fds[i].fd == comfds->fd) {
 				
 		        
-		        int buffer = 0;
-		        int port = dsu_sockfd->port;
-		        
-		        
-		        /*  Race condition on recv, hence do not wait, and continue on error. */
-		        int r = dsu_recv(comfds->fd, &buffer, sizeof(buffer), MSG_DONTWAIT);
-		        
-		        
-		        /*  Connection is closed by client. */
-		        if (r == 0) {
-		            
-		            DSU_DEBUG_PRINT(" - Close on %d (%d)\n", comfds->fd, (int) getpid());            
-		            dsu_close(comfds->fd);
-		            
-		            struct dsu_fd_list *_comfds = comfds;
-		            comfds = comfds->next;
-		            dsu_socket_remove_fds(dsu_sockfd, _comfds->fd, DSU_INTERNAL_FD);
-		            
-		            continue;
-		        } 
-		        
-		        
-		        /*  Other process already read message. */
-		        else if (r == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
-		            goto dsu_next_comfd;
-		        
-		        
-		        /*  Unkown error. */
-		        else if (r == -1)
-		            port = -1;
-		        
-		        
-				if (port != -1) {
-					
-					DSU_DEBUG_PRINT(" < Lock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
-					sem_wait(dsu_sockfd->status_sem);
-					
-					DSU_DEBUG_PRINT(" - DSU_TRANSFER %d (%d)\n", dsu_sockfd->port, (int) getpid());
-					/* Possible multiple processes respond to requests. */
-					if (dsu_sockfd->transfer == 0) {++dsu_sockfd->status[DSU_TRANSFER]; dsu_sockfd->transfer = 1;}
-					
-					DSU_DEBUG_PRINT(" > Unlock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
-					sem_post(dsu_sockfd->status_sem);
-					
-				}
+		        comfds = dsu_respond_internal_connection(dsu_sockfd, comfds);
+				
+				
+		    } else {
 
-				
-		        DSU_DEBUG_PRINT(" - Send file descriptors on %d (%d)\n", comfds->fd, (int) getpid());
-		        dsu_write_fd(comfds->fd, dsu_sockfd->shadowfd, port); // handle return value;
-				dsu_write_fd(comfds->fd, dsu_sockfd->comfd, port);
-				
-				
-		    }
-		    
-		    dsu_next_comfd:
-		        comfds = comfds->next;
-		            
+				comfds = comfds->next;
+
+
+			}         
 		}
 	}
 }
@@ -291,8 +229,16 @@ void dsu_post_poll(struct pollfd *fds, struct pollfd *_fds, nfds_t _nfds) {
 }
 
 
+void dsu_reset_revents(struct pollfd *fds, nfds_t nfds) {
+
+	for(int i = 0; i < nfds; i++) {
+		fds[i].revents = 0;
+	}
+
+}
+
+
 int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, const sigset_t *sigmask) {
-	
 	DSU_DEBUG_PRINT("PPoll() (%d)\n", (int) getpid());
     /* 	Poll() performs a similar task to select(2): it waits for one of a set of file descriptors to become ready to perform I/O. The set 
 		of file descriptors to be monitored is specified in the fds argument, which is an array of structures of the following form:
@@ -310,27 +256,11 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
 	#endif
 
 
-	/* 	On first call to poll, mark worker active and configure binded sockets. */
-	if (!dsu_program_state.live) {	
-		
-		dsu_activate_process();
-		dsu_configure_process();
-		
-		/*	Process is initialized. */
-		dsu_program_state.live = 1;
-	}
-	
-	
-	/* 	State check on binded sockets. */
-	dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
+	DSU_INITIALIZE_EVENT;
 
 
-	if (dsu_termination_detection()) {
-		dsu_terminate();
-	}
-
-
-	/*	Create shadow file descriptor list that can be modified. */
+	/*	Create copy file descriptor array that can be modified, cannot extend original array
+		because the size is unkown. */
 	nfds_max = FD_SETSIZE;
 	nfds_t _nfds = nfds;
 	struct pollfd _fds[nfds_max]; 
@@ -338,6 +268,11 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
 	memcpy(_fds, fds, sizeof(struct pollfd) * nfds);
 	
 
+	/*	Reset revents in original list. */
+	dsu_reset_revents(fds, nfds);
+
+
+	/* 	Reset correction. */
     correction = 0;
 
 

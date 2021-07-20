@@ -60,6 +60,9 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd);
 void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd);
 void dsu_activate_process(void);
 void dsu_configure_process(void);
+void dsu_accept_internal_connection(struct dsu_socket_list *dsu_sockfd);
+struct dsu_fd_list *dsu_respond_internal_connection(struct dsu_socket_list *dsu_sockfd, struct dsu_fd_list *comfds);
+
 
 #define DSU_INITIALIZE_EVENT dsu_initialize_event()
 void dsu_initialize_event(void);
@@ -71,6 +74,8 @@ extern int (*dsu_accept)(int, struct sockaddr *restrict, socklen_t *restrict);
 extern int (*dsu_accept4)(int, struct sockaddr *restrict, socklen_t *restrict, int);
 extern int (*dsu_shutdown)(int, int);
 extern int (*dsu_close)(int);
+extern int (*dsu_fcntl)(int, int, char *);
+extern int (*dsu_ioctl)(int, unsigned long, char *);
 extern int (*dsu_getsockopt)(int, int, int, void *restrict, socklen_t *restrict);
 extern int (*dsu_setsockopt)(int, int, int, const void *, socklen_t);
 extern int (*dsu_getsockname)(int, struct sockaddr *restrict, socklen_t *restrict);
@@ -83,6 +88,8 @@ extern ssize_t (*dsu_write)(int, const void *, size_t);
 extern ssize_t (*dsu_send)(int, const void *, size_t, int);
 extern ssize_t (*dsu_sendto)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
 extern ssize_t (*dsu_sendmsg)(int, const struct msghdr *, int);
+extern int (*dsu_fcntl)(int, int, char *);
+extern int (*dsu_ioctl)(int, unsigned long, char *);
 
 
 #endif
