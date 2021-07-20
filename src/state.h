@@ -10,11 +10,7 @@
 #include <sys/epoll.h>
 
 
-#ifdef DEBUG
-#define DSU_DEBUG 1
-#else
-#define DSU_DEBUG 0
-#endif
+#include "log.h"
 
 
 /*  Linked list for sockets for communication between different versions. */
@@ -69,7 +65,7 @@ struct dsu_socket_list {
 struct dsu_state_struct {
 
 	
-	#if DSU_DEBUG == 1
+	#ifdef DEBUG
 	FILE *logfd;
 	#endif  
 

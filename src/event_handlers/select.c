@@ -10,6 +10,7 @@
 #include <netinet/ip.h>
 
 #include "../core.h"
+#include "../wrapper.h"
 #include "../state.h"
 #include "../communication.h"
 
@@ -18,9 +19,9 @@ int (*dsu_select)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 int (*dsu_pselect)(int, fd_set *, fd_set *, fd_set *, const struct timespec *, const sigset_t *);
 
 
-int correction = 0;
-int max_fds = 0;
-int transfer = 0;
+int dsu_correction = 0;
+int dsu_max_fds = 0;
+int dsu_transfer = 0;
 
 
 void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
@@ -35,7 +36,7 @@ void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 		DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
 		
 		FD_SET(dsu_sockfd->comfd, readfds);
-		if (max_fds < dsu_sockfd->comfd + 1) max_fds = dsu_sockfd->comfd + 1;
+		if (dsu_max_fds < dsu_sockfd->comfd + 1) dsu_max_fds = dsu_sockfd->comfd + 1;
 	}
 	
     
@@ -47,7 +48,7 @@ void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	    DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", comfds->fd, (int) getpid(), (int) gettid());
 	    
 		FD_SET(comfds->fd, readfds);
-		if (max_fds < comfds->fd + 1) max_fds = comfds->fd + 1;
+		if (dsu_max_fds < comfds->fd + 1) dsu_max_fds = comfds->fd + 1;
 		
 	    comfds = comfds->next;        
 	}
@@ -63,7 +64,7 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	if (readfds != NULL && FD_ISSET(dsu_sockfd->comfd, readfds)) {
 		
 
-		++correction; // Reduction of connections in readfds.
+		++dsu_correction; // Reduction of connections in readfds.
 	
 
 		dsu_accept_internal_connection(dsu_sockfd);
@@ -87,7 +88,7 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
             FD_CLR(comfds->fd, readfds);
 
 			
-			++correction;
+			++dsu_correction;
             
 
 			comfds = dsu_respond_internal_connection(dsu_sockfd, comfds);
@@ -122,10 +123,12 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 			if (sem_wait(dsu_sockfd->status_sem) == 0) {
 			
-                if (dsu_sockfd->status[DSU_TRANSFER] > 0) transfer = 1;
+
+                if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer = 1;
+
                 
                 /*  Only one process can monitor a blocking socket. During transfer use lock. */
-				if (transfer && dsu_sockfd->blocking) {
+				if (dsu_sockfd->status[DSU_TRANSFER] > 0 && dsu_sockfd->blocking) {
 					
                     
 					DSU_DEBUG_PRINT(" - Try lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
@@ -139,7 +142,7 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 						/*  Set shadow file descriptor. */
 						DSU_DEBUG_PRINT(" - Set %d => %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
 						FD_SET(dsu_sockfd->shadowfd, readfds);
-						if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
+						if (dsu_max_fds < dsu_sockfd->shadowfd + 1) dsu_max_fds = dsu_sockfd->shadowfd + 1;
 
 					}
 
@@ -150,7 +153,7 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 					/*  Set shadow file descriptor. */
 					DSU_DEBUG_PRINT(" - Set %d => %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
 					FD_SET(dsu_sockfd->shadowfd, readfds);
-					if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
+					if (dsu_max_fds < dsu_sockfd->shadowfd + 1) dsu_max_fds = dsu_sockfd->shadowfd + 1;
 
 				}
 			
@@ -198,15 +201,15 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, cons
 	
 
     /*  It might be necessary to increase the maximum file descriptors that need to be monitored. */
-	max_fds = nfds;
+	dsu_max_fds = nfds;
 
 
     /*  This will be marked to 1 if one of the sockets is transfering a file descriptor, this is used to activate locking
         and decrease the timeout. */
-	transfer = 0;
+	dsu_transfer = 0;
 	
 
-    #if DSU_DEBUG == 1
+    #ifdef DEBUG
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if ( readfds != NULL && FD_ISSET(i, readfds) ) {
 			DSU_DEBUG_PRINT(" - User listening: %d (%d-%d)\n", i, (int) getpid(), (int) gettid());
@@ -228,28 +231,28 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, cons
 	/* To support non-blocking sockets, narrow down the time between locks. */
 	const struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000 /* 100 microseconds (usec). */ };
 	const struct timespec *pts = timeout;
-	if (transfer == 1 && timeout == NULL) {
+	if (dsu_transfer == 1 && timeout == NULL) {
 		pts = &ts;
 	}
 
 
-	#if DSU_DEBUG == 1
+	#ifdef DEBUG
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if (readfds != NULL && FD_ISSET(i, readfds) ) {
 			DSU_DEBUG_PRINT(" - Listening: %d (%d-%d)\n", i, (int) getpid(), (int) gettid());
 		}
-	DSU_DEBUG_PRINT(" - Size: %d (%d-%d)\n", max_fds, (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT(" - Size: %d (%d-%d)\n", dsu_max_fds, (int) getpid(), (int) gettid());
 	#endif
 
 
-    int result = dsu_pselect(max_fds, readfds, writefds, exceptfds, pts, sigmask);
+    int result = dsu_pselect(dsu_max_fds, readfds, writefds, exceptfds, pts, sigmask);
     if (result == -1) {
 		DSU_DEBUG_PRINT(" - error: (%d-%d)\n", (int) getpid(), (int) gettid());
 		return result;
 	}
 	
     
-	#if DSU_DEBUG == 1
+	#ifdef DEBUG
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if ( readfds != NULL && FD_ISSET(i, readfds) ) {
 			DSU_DEBUG_PRINT(" - Incomming: %d (%d-%d)\n", i, (int) getpid(), (int) gettid());
@@ -266,8 +269,8 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, cons
 
    	
     /*  Used respond the correct number of file descriptors that triggered the select function. */			
-	int _correction = correction;
-	correction = 0;
+	int _correction = dsu_correction;
+	dsu_correction = 0;
 	
 	
 	/* Avoid changing external behaviour. Most applications cannot handle return value of 0, hence call select recursively. */
@@ -285,7 +288,7 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, cons
 	}
 
 
-	#if DSU_DEBUG == 1
+	#ifdef DEBUG
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if ( readfds != NULL && FD_ISSET(i, readfds) ) {
 			DSU_DEBUG_PRINT(" - User incomming: %d (%d-%d)\n", i, (int) getpid(), (int) gettid());

@@ -7,6 +7,7 @@
 #include <netinet/ip.h>
 
 #include "../core.h"
+#include "../wrapper.h"
 #include "../state.h"
 #include "../communication.h"
 
@@ -18,6 +19,7 @@ int (*dsu_epoll_create)(int);
 int (*dsu_epoll_ctl)(int, int, int, struct epoll_event *);
 
 
+int dsu_transfer;
 
 
 int epoll_create1(int flags) {
@@ -163,7 +165,10 @@ void dsu_epoll_shadowfd(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 
 		DSU_DEBUG_PRINT(" < Lock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
 		if (sem_wait(dsu_sockfd->status_sem) == 0) {
+
             
+			if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer = 1;
+
 
             /*  Only one process can monitor a blocking socket. During transfer use lock. */
 			if (dsu_sockfd->status[DSU_TRANSFER] > 0 && dsu_sockfd->blocking) {
@@ -313,11 +318,21 @@ int epoll_pwait(int epfd, struct epoll_event *events, int maxevents, int timeout
 	DSU_INITIALIZE_EVENT;
 
 	
+	dsu_transfer = 0;
+
+	
 	/*	Prepare for epoll. */
 	dsu_pre_epoll(epfd);
 
-
-	int nfds = dsu_epoll_pwait(epfd, events, maxevents, timeout, sigmask);
+	
+	/* To support non-blocking sockets, narrow down the time between locks. */
+	int _timeout = timeout;
+	if (dsu_transfer == 1 && timeout < 0) {
+		_timeout = 100;
+	}
+	
+	
+	int nfds = dsu_epoll_pwait(epfd, events, maxevents, _timeout, sigmask);
 
 
 	/*	Translate epoll response. */
@@ -339,7 +354,10 @@ int epoll_pwait2(int epfd, struct epoll_event *events, int maxevents, const stru
 	
 	
 	/* 	Convert time to miliseconds. */
-	int ts = timeout->tv_sec * 1000 + timeout->tv_nsec / 1000000;
+	int ts = -1; // Indefinite.
+	if (timeout != NULL) {
+		ts = timeout->tv_sec * 1000 + timeout->tv_nsec / 1000000;
+	}
 	
 
 	return epoll_pwait(epfd, events, maxevents, ts, NULL);

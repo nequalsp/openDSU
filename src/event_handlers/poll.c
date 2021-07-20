@@ -9,6 +9,7 @@
 #include <netinet/ip.h>
 
 #include "../core.h"
+#include "../wrapper.h"
 #include "../state.h"
 #include "../communication.h"
 
@@ -16,8 +17,9 @@
 int (*dsu_poll)(struct pollfd *, nfds_t, int);
 int (*dsu_ppoll)(struct pollfd *, nfds_t, const struct timespec *, const sigset_t *);
 
-int nfds_max;
-int correction;
+int dsu_nfds_max;
+int dsu_correction;
+int dsu_transfer;
 
 
 void dsu_compress_fds(struct pollfd *fds, nfds_t *nfds) {
@@ -48,7 +50,7 @@ void dsu_sniff_conn_poll(struct dsu_socket_list *dsu_sockfd, struct pollfd *fds,
 	if (dsu_sockfd->monitoring) {
 
 		DSU_DEBUG_PRINT(" - Add %d (%d)\n", dsu_sockfd->comfd, (int) getpid());
-		if (*nfds < nfds_max) {
+		if (*nfds < dsu_nfds_max) {
 			fds[*nfds].fd = dsu_sockfd->comfd;
 			fds[*nfds].events = POLLIN;
 			fds[(*nfds)++].revents = 0;
@@ -63,7 +65,7 @@ void dsu_sniff_conn_poll(struct dsu_socket_list *dsu_sockfd, struct pollfd *fds,
 	while (comfds != NULL) {
 
 	    DSU_DEBUG_PRINT(" - Add %d (%d)\n", comfds->fd, (int) getpid());
-		if (*nfds < nfds_max) { // Avoid buffer overflow.
+		if (*nfds < dsu_nfds_max) { // Avoid buffer overflow.
 			fds[*nfds].fd = comfds->fd;	
 			fds[*nfds].events = POLLIN;
 			fds[(*nfds)++].revents = 0;
@@ -85,7 +87,7 @@ void dsu_handle_conn_poll(struct dsu_socket_list *dsu_sockfd, struct pollfd *fds
 		if (fds[i].revents == 0) continue;
 
 		
-		++correction;
+		++dsu_correction;
 		
 
 		/* 	Accept connection requests. */
@@ -140,6 +142,9 @@ void dsu_pre_poll(struct pollfd *fds, nfds_t *nfds) {
 			DSU_DEBUG_PRINT(" < Lock status %d (%d)\n", dsu_sockfd->port, (int) getpid());
 			if (sem_wait(dsu_sockfd->status_sem) == 0) {
                 
+
+				if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer = 1;
+
 
                 /*  Only one process can monitor a blocking socket. During transfer use lock. */
 				if (dsu_sockfd->status[DSU_TRANSFER] > 0 && dsu_sockfd->blocking) {
@@ -250,7 +255,7 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
        	The caller should specify the number of items in the fds array in nfds. */
 	
 
-	#if DSU_DEBUG == 1
+	#ifdef DEBUG
 	for(int i = 0; i < nfds; i++)
 		DSU_DEBUG_PRINT(" - Listening user: %d (%d)\n", fds[i].fd, (int) getpid());
 	#endif
@@ -261,9 +266,9 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
 
 	/*	Create copy file descriptor array that can be modified, cannot extend original array
 		because the size is unkown. */
-	nfds_max = FD_SETSIZE;
+	dsu_nfds_max = FD_SETSIZE;
 	nfds_t _nfds = nfds;
-	struct pollfd _fds[nfds_max]; 
+	struct pollfd _fds[dsu_nfds_max]; 
 	memset(_fds, 0, sizeof(_fds));
 	memcpy(_fds, fds, sizeof(struct pollfd) * nfds);
 	
@@ -273,7 +278,10 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
 
 
 	/* 	Reset correction. */
-    correction = 0;
+    dsu_correction = 0;
+
+
+	dsu_transfer = 0;
 
 
     /*  Convert to shadow file descriptors, this must be done for binded sockets. */
@@ -283,21 +291,29 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
     /*  Sniff on internal communication.  */
     dsu_forall_sockets(dsu_program_state.binds, dsu_sniff_conn_poll, _fds, &_nfds);
 
-
-	#if DSU_DEBUG == 1
+	
+	/* To support non-blocking sockets, narrow down the time between locks. */
+	const struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000 /* 100 microseconds (usec). */ };
+	const struct timespec *pts = timeout_ts;
+	if (dsu_transfer == 1 && timeout_ts == NULL) {
+		pts = &ts;
+	}
+	
+	
+	#ifdef DEBUG
 	for(int i = 0; i < _nfds; i++) {
 			DSU_DEBUG_PRINT(" - Listening: %d %d(%d)\n", _fds[i].fd, _fds[i].events & POLLIN, (int) getpid());
 	}
 	#endif
 
 
-    int result = dsu_ppoll(_fds, _nfds, timeout_ts, sigmask);
+    int result = dsu_ppoll(_fds, _nfds, pts, sigmask);
     if (result <= 0) {
 		return result;
 	}
 	
     
-	#if DSU_DEBUG == 1
+	#ifdef DEBUG
 	for(int i = 0; i < _nfds; i++) {
 		if (_fds[i].revents != 0)
 			DSU_DEBUG_PRINT(" - Incomming: %d (%d)\n", _fds[i].fd, (int) getpid());
@@ -313,7 +329,7 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
    	dsu_post_poll(fds, _fds, _nfds);
 	
 
-	#if DSU_DEBUG == 1
+	#ifdef DEBUG
 	for(int i = 0; i < nfds; i++) {
 		if (fds[i].revents != 0)
 			DSU_DEBUG_PRINT(" - Incomming user: %d (%d)\n", fds[i].fd, (int) getpid());
@@ -321,7 +337,7 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
 	#endif
 	
 	
-	return result - correction;
+	return result - dsu_correction;
 }
 
 

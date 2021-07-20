@@ -2,6 +2,7 @@
 
 
 #include "core.h"
+#include "wrapper.h"
 
 
 int dsu_write_fd(int fd, int sendfd, int port) {
