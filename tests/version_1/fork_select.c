@@ -1,26 +1,24 @@
-#include <openDSU.h>
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <sys/un.h>
 #include <sys/ipc.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
-
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <fcntl.h>
 
 #define PORT    3000
 #define MAXMSG  512
 
 
 int main (int argc, char **argv) {
-    
-    DSU_INIT;
     
 	/* Create the socket. */
 	struct sockaddr_in name;
@@ -45,6 +43,9 @@ int main (int argc, char **argv) {
       perror("Error start listening on socket");
       exit(EXIT_FAILURE);
     }
+
+	/* Must be non-blocking, otherwise race conditions could happen. */
+	fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
 
 	/* Initialize the set of active sockets. */
 	fd_set active_fd_set, read_fd_set;
@@ -87,7 +88,9 @@ int main (int argc, char **argv) {
 						perror("Error reading message");
 						exit(EXIT_FAILURE);
 					} else if (nbytes == 0) {
-						; // Do nothing.
+						/* Close connection. */
+					    close(i);
+	                    FD_CLR(i, &active_fd_set);
 					} else {
 	  					/* Write response. */
 						char response[25] = "Hello, this is version 2\0";
@@ -97,11 +100,6 @@ int main (int argc, char **argv) {
 							exit(EXIT_FAILURE);
 						}
 					}
-					
-					/* Close connection. */
-					close(i);
-	                FD_CLR(i, &active_fd_set);
-				
 	          	}
 	      	}
 		}

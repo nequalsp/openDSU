@@ -1,48 +1,74 @@
-# Compilation settings
 CFLAGS	+= -Wall -Werror
 CFLAGS	+= -O3
 CFLAGS	+= -g2
 CC?=gcc
 
-DEBUG= -D DEBUG	
-LIB=/usr/local/lib/openDSU
-INCLUDE=/usr/local/include/openDSU
 
-# File location of test scripts.
-SRC:=tests/version_0
-OBJ:=tests/version_0
-INC:=tests/version_0/includes
-SRCS:=$(wildcard $(SRC)/*.c)
-OBJS:=$(patsubst $(SRC)/%.c,$(SRC)/%.o,$(SRCS))
-INCS:=$(wildcard $(INC)/*.c)
-INCS_OBJ:=$(patsubst $(INC)/%.c,$(INC)/%.o,$(INCS))
+DEBUG= #-D DEBUG
+
+	
+LIB=/usr/local/lib
+BIN=/usr/local/bin
 
 
-all: build install test
+all: uninstall build install
 
 
-# Compile shared library.	
-build: libopenDSU.so
-
-openDSU.o: openDSU.c
-	$(CC) -c $(CFLAGS) -fpic $< -o $@ $(DEBUG)
-
-libopenDSU.so: openDSU.o
-	$(CC) -shared $< -o $@ $(DEBUG)
 
 
-install: build
-	$(MAKE) -C ./install install
+build: 
+	$(MAKE) -C ./src build
+
+
+
+
+
+install: $(LIB)/libopenDSU.so $(BIN)/openDSU
+
+$(LIB)/libopenDSU.so: 
+	cp libopenDSU.so $(LIB)/libopenDSU.so
+
+$(BIN)/openDSU:
+	cp openDSU $(BIN)/openDSU
+
+
+
 
 uninstall:
-	$(MAKE) -C ./install uninstall
+	rm -f $(LIB)/libopenDSU.so
+	rm -f $(BIN)/openDSU
+
+
+
 
 
 test:
 	$(MAKE) -C ./tests test
 
+
+
+
+benchmarks:
+	$(MAKE) -C ./benchmark benchmark
+
+apache:
+	$(MAKE) -C ./benchmark apache.o
+
+nginx:
+	$(MAKE) -C ./benchmark nginx.o
+
+httpdlight:
+	$(MAKE) -C ./benchmark httpdlight.o
+
+
+
+
 clean:
-	rm -f libopenDSU.so
-	rm -f openDSU.o
 	$(MAKE) -C ./tests clean
+	$(MAKE) -C ./src clean
+	#$(MAKE) -C ./benchmark clean
+	rm -f /var/log/dsu_*
+	
+
+
 

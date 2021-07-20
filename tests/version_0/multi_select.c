@@ -12,38 +12,37 @@
 #include <sys/shm.h>
 
 
-#define PORT    3000
-#define PORT2   3001
+#define PORT1    3000
+#define PORT2    3001
 #define MAXMSG  512
 
 
 int main (int argc, char **argv) {
     
 	/* Create the socket. */
-	struct sockaddr_in name;
-	int sock = socket(PF_INET, SOCK_STREAM, 0);
-	if (sock < 0) {
+	struct sockaddr_in name1;
+	int sock1 = socket(PF_INET, SOCK_STREAM, 0);
+	if (sock1 < 0) {
 		perror ("Error creating socket");
 		exit (EXIT_FAILURE);
 	}
 
 	/* Bind socket. */
-	name.sin_family = AF_INET;
-	name.sin_port = htons(PORT);
-	name.sin_addr.s_addr = htonl(INADDR_ANY);
-	if (bind(sock, (struct sockaddr *) &name, sizeof(name)) < 0) {
+	name1.sin_family = AF_INET;
+	name1.sin_port = htons(PORT1);
+	name1.sin_addr.s_addr = htonl(INADDR_ANY);
+	if (bind(sock1, (struct sockaddr *) &name1, sizeof(name1)) < 0) {
 		perror("Error binding");
 		exit (EXIT_FAILURE);
 	}
 
 	/* Listen on socket. */
-	if (listen(sock, 1) < 0)
+	if (listen(sock1, 1) < 0)
     {
       perror("Error start listening on socket");
       exit(EXIT_FAILURE);
     }
-
-	/* -----------Test close function.------------ */
+	
 	/* Create another the socket. */
 	struct sockaddr_in name2;
 	int sock2 = socket(PF_INET, SOCK_STREAM, 0);
@@ -67,16 +66,14 @@ int main (int argc, char **argv) {
       exit(EXIT_FAILURE);
     }
 
-	close(sock2);
-	/* ----------------------------------------- */
-
 	/* Initialize the set of active sockets. */
 	fd_set active_fd_set, read_fd_set;
 	struct sockaddr_in clientname;
   	FD_ZERO(&active_fd_set);
-  	FD_SET(sock, &active_fd_set);
+  	FD_SET(sock1, &active_fd_set);
+	FD_SET(sock2, &active_fd_set);
 
-	printf("Start listening on port %d...\n", PORT);
+	printf("Start listening on port %d & %d...\n", PORT1, PORT2);
 	while (1)
 	{
 		/* Wait for active socket. */
@@ -90,10 +87,10 @@ int main (int argc, char **argv) {
 		for (int i = 0; i < FD_SETSIZE; ++i) {
 			if (FD_ISSET(i, &read_fd_set)) {
 				
-                if (i == sock) {
+                if (i == sock1 || i == sock2) {
 					/* Accept new connection request. */
 					size_t size = sizeof(clientname);
-					int new = accept(sock, (struct sockaddr *) &clientname, (socklen_t *) &size);
+					int new = accept(i, (struct sockaddr *) &clientname, (socklen_t *) &size);
 					if (new < 0) {
 						perror("Error accepting message");
 						exit(EXIT_FAILURE);

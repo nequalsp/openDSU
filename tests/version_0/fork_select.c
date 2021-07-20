@@ -1,26 +1,26 @@
-#include <openDSU.h>
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <sys/un.h>
 #include <sys/ipc.h>
 #include <sys/sem.h>
 #include <sys/shm.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <fcntl.h>
 
 
 #define PORT    3000
+#define PORT2   3001
 #define MAXMSG  512
 
 
 int main (int argc, char **argv) {
-    
-    DSU_INIT;
     
 	/* Create the socket. */
 	struct sockaddr_in name;
@@ -45,6 +45,36 @@ int main (int argc, char **argv) {
       perror("Error start listening on socket");
       exit(EXIT_FAILURE);
     }
+	
+	/* -----------Test close function.------------ */
+	/* Create another the socket. */
+	struct sockaddr_in name2;
+	int sock2 = socket(PF_INET, SOCK_STREAM, 0);
+	if (sock2 < 0) {
+		perror ("Error creating socket");
+		exit (EXIT_FAILURE);
+	}
+	/* Bind socket. */
+	name2.sin_family = AF_INET;
+	name2.sin_port = htons(PORT2);
+	name2.sin_addr.s_addr = htonl(INADDR_ANY);
+	if (bind(sock2, (struct sockaddr *) &name2, sizeof(name2)) < 0) {
+		perror("Error binding");
+		exit (EXIT_FAILURE);
+	}
+
+	/* Listen on socket. */
+	if (listen(sock2, 1) < 0)
+    {
+      perror("Error start listening on socket");
+      exit(EXIT_FAILURE);
+    }
+
+	close(sock2);
+	/* ----------------------------------------- */
+
+	/* Must be non-blocking, otherwise race conditions could happen. */
+	fcntl(sock, F_SETFL, fcntl(sock, F_GETFL, 0) | O_NONBLOCK);
 
 	/* Initialize the set of active sockets. */
 	fd_set active_fd_set, read_fd_set;
@@ -74,6 +104,8 @@ int main (int argc, char **argv) {
 					int new = accept4(sock, (struct sockaddr *) &clientname, (socklen_t *) &size, SOCK_NONBLOCK);
 					if (new > 0)
 						FD_SET(new, &active_fd_set);
+					else
+						perror("Accept4");
 
 				} else {
 
@@ -87,7 +119,9 @@ int main (int argc, char **argv) {
 						perror("Error reading message");
 						exit(EXIT_FAILURE);
 					} else if (nbytes == 0) {
-						; // Do nothing.
+						/* Close connection. */
+					    close(i);
+	                    FD_CLR(i, &active_fd_set);
 					} else {
 	  					/* Write response. */
 						char response[25] = "Hello, this is version 1\0";
@@ -96,12 +130,7 @@ int main (int argc, char **argv) {
 							perror("Error writing message");
 							exit(EXIT_FAILURE);
 						}
-					}
-					
-					/* Close connection. */
-					close(i);
-	                FD_CLR(i, &active_fd_set);
-				
+					}				
 	          	}
 	      	}
 		}
