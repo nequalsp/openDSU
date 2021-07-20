@@ -327,6 +327,7 @@ void dsu_sniff_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
 
 void dsu_acc_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     /*  Accept connection requests of new generation. Race conditions could occur because multiple
+
         processes or threads are listening on the same socket. */
     
     if (dsu_sockfd->internal[DSU_STATUS] == DSU_ACTIVE 
@@ -334,7 +335,7 @@ void dsu_acc_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
         && dsu_sockfd->locked == DSU_LOCKED) {
                         
             //DSU_DEBUG_PRINT(" ---- Accept IN ---- (%ld-%ld)\n", (long) getpid(), (long) gettid());
-            //fcntl(dsu_sockfd->comfd, F_SETFL, fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK);                         // Handle error.
+            //fcntl(dsu_sockfd->comfd, F_SETFL, fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK);
             
             int size = sizeof(dsu_sockfd->comfd_addr);
             int acc = accept(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size);
@@ -380,6 +381,12 @@ void dsu_handle_conn(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
                                  
                 close(comfds->value);
                 FD_CLR(comfds->value, readfds);
+
+                dsu_sockfd->internal[DSU_STATUS] = DSU_INACTIVE;
+                
+                struct dsu_comfd_struct *_comfds = comfds;
+                comfds = comfds->next;
+                dsu_socket_remove_comfd(dsu_sockfd, _comfds->value);
                 
                 struct dsu_comfd_struct *_comfds = comfds;
                 comfds = comfds->next;
@@ -463,6 +470,7 @@ void dsu_settle_fd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
         
         /* No more connections to handle. */
         DSU_DEBUG_PRINT(" - Binded: %d & Accepted: %d (%ld-%ld)\n", dsu_program_state.binded, dsu_program_state.accepted, (long) getpid(), (long) gettid());
+
         if (dsu_program_state.binded == 0 && dsu_program_state.accepted == 0) {
             DSU_DEBUG_PRINT(" - Exit (%ld-%ld)\n", (long) getpid(), (long) gettid());
             exit(EXIT_SUCCESS);    
@@ -504,7 +512,9 @@ void dsu_settle_fd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
 
                 dsu_sockfd->internal[DSU_STATUS] = DSU_ACTIVE;
 
+
                 ++dsu_program_state.binded;
+
             }
         
         }
@@ -530,7 +540,9 @@ void dsu_set_shadowfd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
         DSU_DEBUG_PRINT(" - Try lock %d (%ld-%ld)\n", dsu_sockfd->port, (long) getpid(), (long) gettid());
         if (sem_trywait(dsu_sockfd->sem_id) == 0) {
             DSU_DEBUG_PRINT(" - Lock %d (%ld-%ld)\n", dsu_sockfd->port, (long) getpid(), (long) gettid());
+
             dsu_sockfd->locked = DSU_LOCKED;
+
             DSU_DEBUG_PRINT(" - Set %d => %d (%ld-%ld)\n", dsu_sockfd->sockfd, dsu_sockfd->shadowfd, (long) getpid(), (long) gettid());
             FD_SET(dsu_sockfd->shadowfd, readfds);
         }
@@ -546,6 +558,7 @@ void dsu_set_originalfd(struct dsu_socket_struct *dsu_sockfd, fd_set *readfds) {
     if (dsu_sockfd->locked == 1) {
         DSU_DEBUG_PRINT(" - Unlock %d (%ld-%ld)\n", dsu_sockfd->port, (long) getpid(), (long) gettid());
         sem_post(dsu_sockfd->sem_id);
+
         dsu_sockfd->locked = 0;
     }
 
@@ -743,7 +756,9 @@ int dsu_bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     int pid = getpid();
     dsu_socketfd->internal[DSU_PGID] = getpgid(pid);
     dsu_socketfd->internal[DSU_COUNTER] = 0;
+
     dsu_socketfd->internal[DSU_STATUS] = DSU_ACTIVE;
+
     memcpy(dsu_socketfd->status, dsu_socketfd->internal, 3*sizeof(long));
     
 
