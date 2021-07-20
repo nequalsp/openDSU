@@ -68,8 +68,6 @@ ssize_t (*dsu_send)(int, const void *, size_t, int);
 ssize_t (*dsu_sendto)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
 ssize_t (*dsu_sendmsg)(int, const struct msghdr *, int);
 
-int (*dsu_open)(const char *, int, mode_t);
-int (*dsu_creat)(const char *, mode_t);
 
 int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 	DSU_DEBUG_PRINT(" - Inherit fd %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
@@ -89,21 +87,20 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
             DSU_DEBUG_PRINT("  - Receive on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
             int port = 0; int _comfd = 0;
             dsu_read_fd(dsu_sockfd->comfd, &dsu_sockfd->shadowfd, &port);	// Handle return value;
-			dsu_read_fd(dsu_sockfd->comfd, &_comfd, &port);
-			DSU_DEBUG_PRINT("  - Received %d & %d (%d-%d)\n", dsu_sockfd->shadowfd, _comfd, (int) getpid(), (int) gettid());
+            dsu_read_fd(dsu_sockfd->comfd, &_comfd, &port);
+	    DSU_DEBUG_PRINT("  - Received %d & %d (%d-%d)\n", dsu_sockfd->shadowfd, _comfd, (int) getpid(), (int) gettid());
 
 	
-			DSU_DEBUG_PRINT("  - Close %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-			dsu_close(dsu_sockfd->comfd);
-			dsu_sockfd->comfd = _comfd;
+	    DSU_DEBUG_PRINT("  - Close %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
+	    dsu_close(dsu_sockfd->comfd);
+	    dsu_sockfd->comfd = _comfd;
 
 
-			return port;
-		}
-	}
-
-
-	return -1;
+            return port;
+        }
+    }
+    
+    return -1;
 }
 
 
