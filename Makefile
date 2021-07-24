@@ -4,7 +4,7 @@ CFLAGS	+= -g2
 CC?=gcc
 
 
-DEBUG= -D DEBUG
+DEBUG= #-D DEBUG
 
 	
 LIB=/usr/local/lib

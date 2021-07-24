@@ -47,6 +47,7 @@ struct dsu_state_struct dsu_program_state;
 
 /* 	For the functions socket(), bind(), listen(), accept(), accept4() and close() a wrapper is 
 	created to maintain shadow data structures of the file descriptors. */
+int (*dsu_socket)(int, int, int);
 int (*dsu_bind)(int, const struct sockaddr *, socklen_t);
 int (*dsu_listen)(int, int);
 int (*dsu_accept)(int, struct sockaddr *restrict, socklen_t *restrict);
@@ -451,10 +452,7 @@ static __attribute__((constructor)) void dsu_init() {
 	/*  Wrappers around system function. RTLD_NEXT will find the next occurrence of a function in the search 
 		order after the current library*/
 
-	#ifdef DEBUG
 	dsu_socket = dlsym(RTLD_NEXT, "socket");
-	#endif
-
 	dsu_bind = dlsym(RTLD_NEXT, "bind");
 	dsu_listen = dlsym(RTLD_NEXT, "listen");
 	dsu_accept = dlsym(RTLD_NEXT, "accept");
@@ -560,11 +558,11 @@ int dup(int oldfd) {
 
 	
 	/* 	Socket is not binded. */
-	if (dsu_sockoldfd == NULL) return dsu_dup3(oldfd);
+	if (dsu_sockoldfd == NULL) return dsu_dup(oldfd);
 
 
 	/* Oldfd is binded, duplicate the shadow file descriptor and add the new file descriptor to the list. */
-	int fd = dsu_dup3(dsu_sockoldfd->shadowfd, newfd, flags) > 0)
+	int fd = dsu_dup(dsu_sockoldfd->shadowfd);
 	if (fd < 0) return fd;
 
 	
@@ -575,7 +573,7 @@ int dup(int oldfd) {
 	new_dsu_sockfd.fd = fd;
 	
 	
-	dsu_sockets_add(dsu_program_state.binds, &new_dsu_sockfd);
+	dsu_sockets_add(&dsu_program_state.binds, &new_dsu_sockfd);
 	
 
 	return fd;
@@ -608,18 +606,18 @@ int dup3(int oldfd, int newfd, int flags) {
 	if (dsu_socknewfd == NULL) {
 		/* 	Only oldfd is binded, duplicate the shadow file descriptor and add the new file descriptor to the list. */
 
-		int fd = dsu_dup3(dsu_sockoldfd->shadowfd, newfd, flags) > 0)
+		int fd = dsu_dup3(dsu_sockoldfd->shadowfd, newfd, flags);
 		if (fd < 0) return fd;
 
 	
 	} else {
 		/*	Both sockets are binded, remove the old binded newfd and insert the new one. */
 
-		int fd = dsu_dup3(dsu_sockoldfd->shadowfd, dsu_socknewfd->shadowfd, flags) > 0);
+		int fd = dsu_dup3(dsu_sockoldfd->shadowfd, dsu_socknewfd->shadowfd, flags);
 		if (fd < 0) return fd;
 
 		
-		dsu_sockets_remove_fd(dsu_program_state.binds, newfd);
+		dsu_sockets_remove_fd(&dsu_program_state.binds, newfd);
 
 
 	}
@@ -628,7 +626,7 @@ int dup3(int oldfd, int newfd, int flags) {
 	new_dsu_sockfd.fd = newfd; 
 	
 
-	dsu_sockets_add(dsu_program_state.binds, &new_dsu_sockfd);
+	dsu_sockets_add(&dsu_program_state.binds, &new_dsu_sockfd);
 
 
 	return newfd;
@@ -637,7 +635,7 @@ int dup3(int oldfd, int newfd, int flags) {
 
 int dup2(int oldfd, int newfd) {
 	DSU_DEBUG_PRINT("Dup2(%d,%d) (%d)\n", oldfd, newfd, (int) getpid());
-	return dup3(oldfd, newfd, NULL);
+	return dup3(oldfd, newfd, 0);
 }
 
 
@@ -893,54 +891,49 @@ int close(int sockfd) {
 
 }
 
+
 /* The prototype stands out in the list of Unix system calls because of the dots, which usually mark the function as having a variable number of arguments. In a real system, however, a system call can't actually have a variable number of arguments. System calls must have a well-defined prototype, because user programs can access them only through hardware "gates." Therefore, the dots in the prototype represent not a variable number of arguments but a single optional argument, traditionally identified as char *argp. The dots are simply there to prevent type checking during compilation. */
 int fcntl(int fd, int cmd, char *argp) {
 	DSU_DEBUG_PRINT("fcntl(%d, cmd, argp) (%d)\n", fd, (int) getpid());
 
 	
+	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, fd);
+	if (dsu_sockfd == NULL) dsu_fcntl(fd, cmd, argp);
+
+	
 	if (cmd == F_DUPFD) {
-		
-		struct dsu_socket_list *dsu_sockoldfd = dsu_sockets_search_fd(dsu_program_state.binds, fd);
 
 
-		/* 	Socket is not binded. */
-		if (dsu_sockoldfd == NULL) return dsu_dup3(oldfd);
-
-
-		/* Oldfd is binded, duplicate the shadow file descriptor and add the new file descriptor to the list. */
-		int newfd = dsu_fcntl(dsu_sockoldfd->shadowfd, cmd, argp);
-		if (newfd < 0) return fd;
+		/* fd is binded, duplicate the shadow file descriptor and add the new file descriptor to the list. */
+		int newfd = dsu_fcntl(dsu_sockfd->shadowfd, cmd, argp);
+		if (newfd < 0) return newfd;
 		
 
 		/* 	Initialize the shadow data structure. */
 		struct dsu_socket_list new_dsu_sockfd;
-		memcpy(&new_dsu_sockfd, dsu_sockoldfd, sizeof(struct dsu_socket_list));
-		new_dsu_sockfd.shadowfd = dsu_dup(dsu_sockoldfd->shadowfd);
+		memcpy(&new_dsu_sockfd, dsu_sockfd, sizeof(struct dsu_socket_list));
+		new_dsu_sockfd.shadowfd = dsu_dup(dsu_sockfd->shadowfd);
 		new_dsu_sockfd.fd = newfd;
 
 
-		dsu_sockets_add(dsu_program_state.binds, &new_dsu_sockfd);
+		dsu_sockets_add(&dsu_program_state.binds, &new_dsu_sockfd);
 
 	
 		return newfd;
 	
 	} else if (cmd == F_SETFD) {
-
-		struct dsu_socket_list *dsu_sockoldfd = dsu_sockets_search_fd(dsu_program_state.binds, fd);
-
+		
 	
-		/* 	Socket is not binded. */
-		if (dsu_sockoldfd == NULL) return dsu_fcntl(fd, cmd, argp);	
-
-
-		if // TO DO!
-	
+		/* 	Set (Non-)blocking. */
+		if ( ! ((int) *argp & O_NONBLOCK) ) {
+			dsu_sockfd->blocking = 0; 
+		} else {
+			dsu_sockfd->blocking = 1; 
+		}
 
 
 	}
 
-		
-
-
-	return dsu_fcntl(dsu_sockoldfd->shadowfd, cmd, argp);
+	
+	return dsu_fcntl(dsu_sockfd->shadowfd, cmd, argp);
 }

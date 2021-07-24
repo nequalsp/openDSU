@@ -56,7 +56,7 @@ void dsu_initialize_event(void);
 
 
 
-
+extern int (*dsu_socket)(int, int, int);
 extern int (*dsu_bind)(int, const struct sockaddr *, socklen_t);
 extern int (*dsu_listen)(int, int);
 extern int (*dsu_accept)(int, struct sockaddr *restrict, socklen_t *restrict);

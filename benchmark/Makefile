@@ -7,7 +7,7 @@ current_dir := $(dir $(mkfile_path))
 benchmark: server
 
 
-server: lighttpd.o nginx.o apache.o
+server: lighttpd.o nginx.o apache.o wrk.o
 
 
 
@@ -101,7 +101,6 @@ apache/Makefile: apache/configure
 		--with-included-apr
 		--with-apr=$(current_dir)apache/srclib/apr
 		--with-mpm=prefork
-		
 
 etc/apache:
 	mkdir -p $(current_dir)etc/apache
@@ -124,10 +123,20 @@ apache.o: etc/apache/logs etc/apache/httpd etc/apache/conf/httpd.conf
 	cp apache/.libs/httpd apache.o
 	
 
+# Benchmark tool wrk
+wrk: 
+	git clone https://github.com/wg/wrk.git
+
+wrk/wrk: wrk
+	cd wrk;\
+	make
+
+wrk.o: wrk/wrk
+	cp wrk/wrk wrk.o
 
 
 clean:
 	rm -rf lighttpd1.4 nginx apache etc
-	rm -f nginx.o lighttpd.o apache.o httpd
+	rm -f nginx.o lighttpd.o apache.o httpd wrk.o
 	rm -f config/nginx.conf config/apache.conf config/lighttpd.conf
 
