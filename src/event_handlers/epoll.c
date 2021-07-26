@@ -19,7 +19,7 @@ int (*dsu_epoll_create)(int);
 int (*dsu_epoll_ctl)(int, int, int, struct epoll_event *);
 
 
-int dsu_transfer;
+int dsu_transfer_epoll = 0;
 
 
 int epoll_create1(int flags) {
@@ -167,7 +167,7 @@ void dsu_epoll_shadowfd(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 		if (sem_wait(dsu_sockfd->status_sem) == 0) {
 
             
-			if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer = 1;
+			if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer_epoll = 1;
 
 
             /*  Only one process can monitor a blocking socket. During transfer use lock. */
@@ -308,31 +308,20 @@ int dsu_post_epoll(int epollfd, int nfds, struct epoll_event *events) {
 }
 
 
-int epoll_pwait(int epfd, struct epoll_event *events, int maxevents, int timeout, const sigset_t *sigmask) {
-	DSU_DEBUG_PRINT("epoll_pwait() (%d)\n", (int) getpid());
-	/* 	The epoll_wait() system call waits for events on the epoll(7) instance referred to by the file descriptor epfd.  The buffer
-		pointed to by events is used to return information from the ready list about file descriptors in the interest list that have some
-       	events available.  Up to maxevents are returned by epoll_wait(). The maxevents argument must be greater than zero. */
-	
+int fepoll_pwait(int epfd, struct epoll_event *events, int maxevents, int timeout, const sigset_t *sigmask) {
+
 
 	DSU_INITIALIZE_EVENT;
 
 	
-	dsu_transfer = 0;
+	dsu_transfer_epoll = 0;
 
 	
 	/*	Prepare for epoll. */
 	dsu_pre_epoll(epfd);
 
 	
-	/* To support non-blocking sockets, narrow down the time between locks. */
-	int _timeout = timeout;
-	if (dsu_transfer == 1 && timeout < 0) {
-		_timeout = 100;
-	}
-	
-	
-	int nfds = dsu_epoll_pwait(epfd, events, maxevents, _timeout, sigmask);
+	int nfds = dsu_epoll_pwait(epfd, events, maxevents, timeout, sigmask);
 
 
 	/*	Translate epoll response. */
@@ -340,6 +329,41 @@ int epoll_pwait(int epfd, struct epoll_event *events, int maxevents, int timeout
 	
 
 	return nfds;
+}
+
+
+int repoll_pwait(int epfd, struct epoll_event *events, int maxevents, int timeout, const sigset_t *sigmask) {
+	DSU_DEBUG_PRINT("repoll_pwait(%d, events, %d, %d, sigmask) (%d)\n", epfd, maxevents, timeout, (int) getpid());
+
+	int time = timeout;
+	if(dsu_transfer_epoll == 1) time = 500;
+
+	int v = 0;	
+	while ( v == 0 ) {
+		v = fepoll_pwait(epfd, events, maxevents, time, sigmask); // 500 ms
+	}
+
+	return v;
+	 
+
+}
+
+
+int epoll_pwait(int epfd, struct epoll_event *events, int maxevents, int timeout, const sigset_t *sigmask) {
+	DSU_DEBUG_PRINT("epoll_pwait() (%d)\n", (int) getpid());
+	/* 	The epoll_wait() system call waits for events on the epoll(7) instance referred to by the file descriptor epfd.  The buffer
+		pointed to by events is used to return information from the ready list about file descriptors in the interest list that have some
+       	events available.  Up to maxevents are returned by epoll_wait(). The maxevents argument must be greater than zero. */
+	
+
+	/*  To support non-blocking sockets, narrow down the time between locks. Do this in while loop, not recursively due to maximum
+		recursive dept. */
+	if (timeout < 0) {
+		repoll_pwait(epfd, events, maxevents, timeout, sigmask);
+	}
+
+	return fepoll_pwait(epfd, events, maxevents, timeout, sigmask);
+
 }
 
 

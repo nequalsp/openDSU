@@ -19,9 +19,9 @@ int (*dsu_select)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 int (*dsu_pselect)(int, fd_set *, fd_set *, fd_set *, const struct timespec *, const sigset_t *);
 
 
-int dsu_correction = 0;
+int dsu_correction_select = 0;
 int dsu_max_fds = 0;
-int dsu_transfer = 0;
+int dsu_transfer_select = 0;
 
 
 void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
@@ -64,7 +64,7 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	if (readfds != NULL && FD_ISSET(dsu_sockfd->comfd, readfds)) {
 		
 
-		++dsu_correction; // Reduction of connections in readfds.
+		++dsu_correction_select; // Reduction of connections in readfds.
 	
 
 		dsu_accept_internal_connection(dsu_sockfd);
@@ -88,7 +88,7 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
             FD_CLR(comfds->fd, readfds);
 
 			
-			++dsu_correction;
+			++dsu_correction_select;
             
 
 			comfds = dsu_respond_internal_connection(dsu_sockfd, comfds);
@@ -124,7 +124,7 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			if (sem_wait(dsu_sockfd->status_sem) == 0) {
 			
 
-                if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer = 1;
+                if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer_select = 1;
 
                 
                 /*  Only one process can monitor a blocking socket. During transfer use lock. */
@@ -166,15 +166,18 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 }
 
 
-void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
-    /*  Change shadow file descripter to its original file descriptor. */
-
-
-    if (dsu_sockfd->locked == DSU_LOCKED) {
+void dsu_unlock_select(struct dsu_socket_list *dsu_sockfd) {
+	
+	if (dsu_sockfd->locked == DSU_LOCKED) {
         DSU_DEBUG_PRINT(" - Unlock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
         sem_post(dsu_sockfd->fd_sem);
         dsu_sockfd->locked = DSU_UNLOCKED;
     }
+	
+}
+
+void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
+    /*  Change shadow file descripter to its original file descriptor. */
 
     
     if (readfds != NULL && FD_ISSET(dsu_sockfd->shadowfd, readfds)) {
@@ -186,19 +189,8 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 }
 
 
-int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, const struct timespec *timeout, const sigset_t *sigmask) {
-	DSU_DEBUG_PRINT("pselect(%d, set, set, set, timeout) (%d-%d)\n", nfds, (int) getpid(), (int) gettid());
-    /*  Select() allows a program to monitor multiple file descriptors, waiting until one or more of the file descriptors 
-        become "ready". The DSU library will modify this list by removing file descriptors that are transfered, and change
-        file descriptors to their shadow file descriptors. */
-	
-	
-	/*  Store original file descriptor sets so select can be called recursively when only internal traffic triggers the 
-        select() function. */
-	fd_set original_readfds; if (readfds != NULL) original_readfds = *readfds;
-	fd_set original_writefds; if (writefds != NULL) original_writefds = *writefds;
-    fd_set original_exceptfds; if (exceptfds != NULL) original_exceptfds = *exceptfds;
-	
+int fpselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, const struct timespec *timeout, const sigset_t *sigmask) {
+
 
     /*  It might be necessary to increase the maximum file descriptors that need to be monitored. */
 	dsu_max_fds = nfds;
@@ -206,7 +198,7 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, cons
 
     /*  This will be marked to 1 if one of the sockets is transfering a file descriptor, this is used to activate locking
         and decrease the timeout. */
-	dsu_transfer = 0;
+	dsu_transfer_select = 0;
 	
 
     #ifdef DEBUG
@@ -228,14 +220,6 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, cons
     dsu_forall_sockets(dsu_program_state.binds, dsu_sniff_conn, readfds);
 
 
-	/* To support non-blocking sockets, narrow down the time between locks. */
-	const struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000 /* 100 microseconds (usec). */ };
-	const struct timespec *pts = timeout;
-	if (dsu_transfer == 1 && timeout == NULL) {
-		pts = &ts;
-	}
-
-
 	#ifdef DEBUG
 	for(int i = 0; i < FD_SETSIZE; i++)
 		if (readfds != NULL && FD_ISSET(i, readfds) ) {
@@ -245,9 +229,13 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, cons
 	#endif
 
 
-    int result = dsu_pselect(dsu_max_fds, readfds, writefds, exceptfds, pts, sigmask);
+    int result = dsu_pselect(dsu_max_fds, readfds, writefds, exceptfds, timeout, sigmask);
     if (result == -1) {
-		DSU_DEBUG_PRINT(" - error: (%d-%d)\n", (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT(" - error: (%d-%d)\n", (int) getpid(), (int) gettid());	
+
+		/*	Unlock binded file descriptors. */
+		dsu_forall_sockets(dsu_program_state.binds, dsu_unlock_select);
+		
 		return result;
 	}
 	
@@ -264,28 +252,17 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, cons
     dsu_forall_sockets(dsu_program_state.binds, dsu_handle_conn, readfds);
     
 
+	/*	Unlock binded file descriptors. */
+	dsu_forall_sockets(dsu_program_state.binds, dsu_unlock_select);
+	
+
     /*  Convert shadow file descriptors back to user level file descriptors to avoid changing the external behaviour. */
     dsu_forall_sockets(dsu_program_state.binds, dsu_post_select, readfds);
 
    	
     /*  Used respond the correct number of file descriptors that triggered the select function. */			
-	int _correction = dsu_correction;
-	dsu_correction = 0;
-	
-	
-	/* Avoid changing external behaviour. Most applications cannot handle return value of 0, hence call select recursively. */
-	if (result - _correction == 0 && timeout == NULL) {
-		DSU_DEBUG_PRINT(" - Restart Select() (%d-%d)\n", (int) getpid(), (int) gettid());
-
-
-		if (readfds != NULL) *readfds = original_readfds;
-		if (writefds != NULL) *writefds = original_writefds;
-		if (exceptfds != NULL) *exceptfds = original_exceptfds;
-
-
-		return dsu_pselect(nfds, readfds, writefds, exceptfds, NULL, NULL);
-
-	}
+	int _correction = dsu_correction_select;
+	dsu_correction_select = 0;
 
 
 	#ifdef DEBUG
@@ -298,6 +275,44 @@ int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, cons
 	
 	
 	return result - _correction;
+}
+
+
+int rpselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, const struct timespec *timeout, const sigset_t *sigmask) {
+	
+
+	const struct timespec ts = {.tv_sec = 0, .tv_nsec = 500000 /* 500 microseconds (usec). */ };
+	const struct timespec *ps = timeout;
+	if (dsu_transfer_select == 1) {
+		ps = &ts;
+	}
+
+	
+	int v = 0;	
+	while ( v == 0 ) {
+		v = fpselect(nfds, readfds, writefds, exceptfds, ps, sigmask);
+	}
+	
+
+	return v;
+
+}
+
+
+int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, const struct timespec *timeout, const sigset_t *sigmask) {
+	DSU_DEBUG_PRINT("pselect(%d, set, set, set, timeout) (%d-%d)\n", nfds, (int) getpid(), (int) gettid());
+    /*  Select() allows a program to monitor multiple file descriptors, waiting until one or more of the file descriptors 
+        become "ready". The DSU library will modify this list by removing file descriptors that are transfered, and change
+        file descriptors to their shadow file descriptors. */
+	
+	
+	/* 	During transfer, rotate faster to have short file descriptor locks. */
+	if (timeout == NULL) {
+		return rpselect(nfds, readfds, writefds, exceptfds, timeout, sigmask);
+	}
+
+	
+	return fpselect(nfds, readfds, writefds, exceptfds, timeout, sigmask);
 }
 
 

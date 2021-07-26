@@ -17,9 +17,9 @@
 int (*dsu_poll)(struct pollfd *, nfds_t, int);
 int (*dsu_ppoll)(struct pollfd *, nfds_t, const struct timespec *, const sigset_t *);
 
-int dsu_nfds_max;
-int dsu_correction;
-int dsu_transfer;
+unsigned long dsu_nfds_max = 0;
+int dsu_correction_poll = 0;
+int dsu_transfer_poll = 0;
 
 
 void dsu_compress_fds(struct pollfd *fds, nfds_t *nfds) {
@@ -32,6 +32,7 @@ void dsu_compress_fds(struct pollfd *fds, nfds_t *nfds) {
 			for(int j = i; j < *nfds; j++) {
 				fds[j].fd = fds[j+1].fd;
 				fds[j].events = fds[j+1].events;
+				fds[j].revents = fds[j+1].revents;
 			}
 				
 			i--;
@@ -87,7 +88,7 @@ void dsu_handle_conn_poll(struct dsu_socket_list *dsu_sockfd, struct pollfd *fds
 		if (fds[i].revents == 0) continue;
 
 		
-		++dsu_correction;
+		++dsu_correction_poll;
 		
 
 		/* 	Accept connection requests. */
@@ -143,7 +144,7 @@ void dsu_pre_poll(struct pollfd *fds, nfds_t *nfds) {
 			if (sem_wait(dsu_sockfd->status_sem) == 0) {
                 
 
-				if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer = 1;
+				if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer_poll = 1;
 
 
                 /*  Only one process can monitor a blocking socket. During transfer use lock. */
@@ -187,7 +188,7 @@ void dsu_pre_poll(struct pollfd *fds, nfds_t *nfds) {
 
 
 void dsu_unlock(struct dsu_socket_list *dsu_sockfd) {
-	
+	DSU_DEBUG_PRINT(" - Unlock (%d)\n", (int) getpid());
 
 	if (dsu_sockfd->locked == DSU_LOCKED) {
         DSU_DEBUG_PRINT(" > Unlock fd %d (%d)\n", dsu_sockfd->port, (int) getpid());
@@ -212,7 +213,7 @@ void dsu_set_revents(struct pollfd *fds, struct pollfd *_fds, nfds_t _nfds) {
 			while ( fd != fds[i+o].fd) ++o;
 		
 			
-			fds[i+o].revents = 1;
+			fds[i+o].revents = _fds[i].revents;
 		}
 				
 	}
@@ -235,7 +236,7 @@ void dsu_post_poll(struct pollfd *fds, struct pollfd *_fds, nfds_t _nfds) {
 
 
 void dsu_reset_revents(struct pollfd *fds, nfds_t nfds) {
-
+	
 	for(int i = 0; i < nfds; i++) {
 		fds[i].revents = 0;
 	}
@@ -243,17 +244,8 @@ void dsu_reset_revents(struct pollfd *fds, nfds_t nfds) {
 }
 
 
-int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, const sigset_t *sigmask) {
-	DSU_DEBUG_PRINT("PPoll() (%d)\n", (int) getpid());
-    /* 	Poll() performs a similar task to select(2): it waits for one of a set of file descriptors to become ready to perform I/O. The set 
-		of file descriptors to be monitored is specified in the fds argument, which is an array of structures of the following form:
-           struct pollfd {
-               int   fd;         file descriptor
-               short events;     requested events
-               short revents;    returned events
-           };
-       	The caller should specify the number of items in the fds array in nfds. */
-	
+int fppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout, const sigset_t *sigmask) {	
+	DSU_DEBUG_PRINT("fppoll(fds, %lu, NULL, sigmask) (%d)\n", nfds,(int) getpid());
 
 	#ifdef DEBUG
 	for(int i = 0; i < nfds; i++)
@@ -266,9 +258,9 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
 
 	/*	Create copy file descriptor array that can be modified, cannot extend original array
 		because the size is unkown. */
-	dsu_nfds_max = FD_SETSIZE;
+	dsu_nfds_max = (unsigned long) FD_SETSIZE;
 	nfds_t _nfds = nfds;
-	struct pollfd _fds[dsu_nfds_max]; 
+	struct pollfd _fds[dsu_nfds_max];
 	memset(_fds, 0, sizeof(_fds));
 	memcpy(_fds, fds, sizeof(struct pollfd) * nfds);
 	
@@ -278,27 +270,20 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
 
 
 	/* 	Reset correction. */
-    dsu_correction = 0;
+    dsu_correction_poll = 0;
 
 
-	dsu_transfer = 0;
+	/*  Reset transfer. */
+	dsu_transfer_poll = 0;
 
 
     /*  Convert to shadow file descriptors, this must be done for binded sockets. */
 	dsu_pre_poll(_fds, &_nfds);
     
-    
+
     /*  Sniff on internal communication.  */
     dsu_forall_sockets(dsu_program_state.binds, dsu_sniff_conn_poll, _fds, &_nfds);
-
-	
-	/* To support non-blocking sockets, narrow down the time between locks. */
-	const struct timespec ts = {.tv_sec = 0, .tv_nsec = 100000 /* 100 microseconds (usec). */ };
-	const struct timespec *pts = timeout_ts;
-	if (dsu_transfer == 1 && timeout_ts == NULL) {
-		pts = &ts;
-	}
-	
+		
 	
 	#ifdef DEBUG
 	for(int i = 0; i < _nfds; i++) {
@@ -307,11 +292,16 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
 	#endif
 
 
-    int result = dsu_ppoll(_fds, _nfds, pts, sigmask);
-    if (result <= 0) {
+    int result = dsu_ppoll(_fds, _nfds, timeout, sigmask);
+	if (result < 0) {
+		DSU_DEBUG_PRINT(" - error: %s (%d)\n", strerror(errno), (int) getpid());
+		
+		/*	Unlock binded file descriptors. */
+		dsu_forall_sockets(dsu_program_state.binds, dsu_unlock);
+		
 		return result;
 	}
-	
+
     
 	#ifdef DEBUG
 	for(int i = 0; i < _nfds; i++) {
@@ -325,7 +315,7 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
     dsu_forall_sockets(dsu_program_state.binds, dsu_handle_conn_poll, _fds, nfds, _nfds);
     
 
-    /*  Convert shadow file descriptors back to user level file descriptors to avoid changing the external behaviour. */
+    /*  Convert shadow file descriptors back to user level file descriptors. */
    	dsu_post_poll(fds, _fds, _nfds);
 	
 
@@ -337,12 +327,51 @@ int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout_ts, co
 	#endif
 	
 	
-	return result - dsu_correction;
+	return result - dsu_correction_poll;
+}
+
+
+int rppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout, const sigset_t *sigmask) {
+	DSU_DEBUG_PRINT("rppoll(fds, %lu, NULL, sigmask) (%d)\n", nfds,(int) getpid());
+
+	const struct timespec ts = {.tv_sec = 0, .tv_nsec = 500000 /* 500 microseconds (usec). */ };
+	const struct timespec *ps = timeout;
+	if (dsu_transfer_poll == 1) {
+		ps = &ts;
+	}
+		
+	int v = 0;	
+	while ( v == 0 ) {
+		v = fppoll(fds, nfds, ps, sigmask);
+	}
+	 
+	return v;
+}
+
+
+int ppoll(struct pollfd *fds, nfds_t nfds, const struct timespec *timeout, const sigset_t *sigmask) {
+	DSU_DEBUG_PRINT("PPoll(fds, %lu, timeout, sigmask) (%d)\n", nfds,(int) getpid());
+    /* 	Poll() performs a similar task to select(2): it waits for one of a set of file descriptors to become ready to perform I/O. The set 
+		of file descriptors to be monitored is specified in the fds argument, which is an array of structures of the following form:
+           struct pollfd {
+               int   fd;         file descriptor
+               short events;     requested events
+               short revents;    returned events
+           };
+       	The caller should specify the number of items in the fds array in nfds. */
+	
+	
+	if (timeout == NULL) {
+		return rppoll(fds, nfds, timeout, sigmask);
+	}
+
+
+	return fppoll(fds, nfds, timeout, sigmask);
 }
 
 
 int poll(struct pollfd *fds, nfds_t nfds, int timeout) {
-	DSU_DEBUG_PRINT("Poll() (%d)\n", (int) getpid());
+	DSU_DEBUG_PRINT("Poll(fds, %lu, %d) (%d)\n", nfds, timeout, (int) getpid());
 
 	struct timespec timeout_ts;
   	struct timespec *timeout_ts_p = NULL;

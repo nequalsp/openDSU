@@ -4,9 +4,6 @@ CFLAGS	+= -g2
 CC?=gcc
 
 
-DEBUG= #-D DEBUG
-
-	
 LIB=/usr/local/lib
 BIN=/usr/local/bin
 

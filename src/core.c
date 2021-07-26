@@ -117,8 +117,7 @@ int dsu_termination_detection() {
 
 			DSU_DEBUG_PRINT("  > Unlock status %d (%d)\n", current->port, (int) getpid());
 			sem_post(current->status_sem);
-		}
-
+		}	
 		
 		if (	current->version >= version
 			|| 	current->monitoring != 0
@@ -138,6 +137,7 @@ int dsu_termination_detection() {
 
 void dsu_terminate() {
 	DSU_DEBUG_PRINT(" - Termination (%d)\n", (int) getpid());
+	DSU_ALERT_PRINT(" - Termination (%d)\n", (int) getpid());
 	/*	Different models, such as master-worker model, are used to horizontally scale the application. This
 		can either be done with threads or processes. As threads are implemented as processes on linux, 
 		there is not difference in termination. The number of active workers is tracked in the event handler. 
@@ -160,6 +160,7 @@ void dsu_terminate() {
 
 	if (workers == 0) {
 		DSU_DEBUG_PRINT("  - All (%d)\n", (int) getpid());
+		DSU_ALERT_PRINT("  - All (%d)\n", (int) getpid());
 		killpg(getpgid(getpid()), SIGKILL);
 	}
 
@@ -238,7 +239,8 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 			&&	!dsu_sockfd->locked
 		) {
 			
-			DSU_DEBUG_PRINT("  - Quit monitoring  %d (%d)\n", dsu_sockfd->port, (int) getpid());
+			DSU_DEBUG_PRINT("  - Quit monitoring %d (%d)\n", dsu_sockfd->port, (int) getpid());
+			DSU_ALERT_PRINT("  - Quit monitoring %d (%d)\n", dsu_sockfd->port, (int) getpid());
 			dsu_close(dsu_sockfd->comfd);
 			dsu_sockfd->monitoring = 0;
 			--dsu_sockfd->status[DSU_TRANSFER];
@@ -250,7 +252,8 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 		if (	dsu_sockfd->version > dsu_sockfd->status[DSU_VERSION]
 			&&	dsu_sockfd->monitoring) {
 			
-			DSU_DEBUG_PRINT("  - Increase version  %d (%d)\n", dsu_sockfd->port, (int) getpid());				
+			DSU_DEBUG_PRINT("  - Increase version %d (%d)\n", dsu_sockfd->port, (int) getpid());
+			DSU_ALERT_PRINT("  - Increase version %d (%d)\n", dsu_sockfd->port, (int) getpid());				
 			dsu_sockfd->status[DSU_PGID] = getpgid(getpid());
 			++dsu_sockfd->status[DSU_VERSION];
 			
@@ -267,7 +270,7 @@ void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
 int dsu_is_blocking(int fd) {
     
     int flags = dsu_fcntl(fd, F_GETFL, 0);
-    if ( !(flags & O_NONBLOCK) ) return 0;
+    if ( flags & O_NONBLOCK ) return 0;
 	
     return 1;
 
@@ -276,6 +279,7 @@ int dsu_is_blocking(int fd) {
 
 void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd) {
     dsu_sockfd->blocking = dsu_is_blocking(dsu_sockfd->shadowfd);
+	DSU_DEBUG_PRINT("  - Port %d Blocking %d (%d)\n", dsu_sockfd->port, dsu_sockfd->blocking, (int) getpid());
 }
 
 
@@ -391,10 +395,17 @@ static __attribute__((constructor)) void dsu_init() {
 	/*	LD_Preload constructor is called before the binary starts. Initialze the program state. */
 	
 
-	#ifdef DEBUG
-    int size = snprintf(NULL, 0, "%s/dsu_%d.log", DEBUG, (int) getpid());
-	char logfile[size+1];	
-	sprintf(logfile, "%s/dsu_%d.log", DEBUG, (int) getpid());
+	#if defined(DEBUG) || defined(ALERT)
+	#if defined(DEBUG)
+		int size = snprintf(NULL, 0, "%s/dsu_%d.log", DEBUG, (int) getpid());
+		char logfile[size+1];
+		sprintf(logfile, "%s/dsu_%d.log", DEBUG, (int) getpid());
+	#endif
+	#if defined(ALERT)
+		int size = snprintf(NULL, 0, "%s/dsu_%d.log", ALERT, (int) getpid());
+		char logfile[size+1];
+		sprintf(logfile, "%s/dsu_%d.log", ALERT, (int) getpid());
+	#endif
 	dsu_program_state.logfd = fopen(logfile, "w");
 	if (dsu_program_state.logfd == NULL) {
 		perror("DSU \"Error opening debugging file\"");
@@ -414,9 +425,9 @@ static __attribute__((constructor)) void dsu_init() {
     int pathname_size = snprintf(NULL, 0, "/%s_%d.state", DSU_COMM, (int) getpgid(getpid()));
     char pathname[pathname_size+1];
     sprintf(pathname, "/%s_%d.state", DSU_COMM, (int) getpgid(getpid()));
-	
 	shm_unlink(pathname);
 	
+
 	int shfd = shm_open(pathname, O_CREAT | O_RDWR | O_TRUNC, O_RDWR);
 	if (shfd == -1) {
 		perror("DSU \"Error creating shared memory\"");
@@ -428,24 +439,31 @@ static __attribute__((constructor)) void dsu_init() {
 		exit(EXIT_FAILURE);
 	}
 
+	
 	dsu_program_state.workers = (int *) mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
 	if (dsu_program_state.workers == (void *) -1) {
 		perror("DSU \"Error creating shared memory\"");
 		exit(EXIT_FAILURE);
 	}
 
+	
 	dsu_program_state.workers[0] = 0;
 
 
-	/*	Create semaphore in shared memory to avoid race conditions during modifications. */
+	/*	Create semaphore in shared memory to avoid race conditions between multiple processes during modifications. */
     int pathname_size_sem = snprintf(NULL, 0, "/%s_%d.lock", DSU_COMM, (int) getpgid(getpid()));
     char pathname_sem[pathname_size_sem+1];
     sprintf(pathname_sem, "/%s_%d.lock", DSU_COMM, (int) getpgid(getpid()));
-	
-	sem_unlink(pathname_sem); // Semaphore does not terminate after exit.
+	sem_unlink(pathname_sem);
     
+
 	dsu_program_state.lock = sem_open(pathname_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+	if (dsu_program_state.lock < 0) {
+		perror("DSU \"Error creating program state lock memory\"");
+		exit(EXIT_FAILURE);
+	}
     
+
 	sem_init(dsu_program_state.lock, PTHREAD_PROCESS_SHARED, 1);
 	
 	
@@ -714,17 +732,31 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 
             if (dsu_inherit_fd(&dsu_socketfd) > 0) {
                 
+
 				dsu_socketfd.monitoring = 1; // Start listening after inheriting the file descriptor.
 				
-				dsu_socketfd.status_sem = sem_open(pathname_status_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-				dsu_socketfd.fd_sem = sem_open(pathname_fd_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-				
+
+				dsu_socketfd.status_sem = sem_open(pathname_status_sem, 1);
+				if (dsu_socketfd.status_sem == SEM_FAILED) {
+					perror("DSU \"Error initializing semaphore for status\"");
+					exit(EXIT_FAILURE);
+				}
+
+
+				dsu_socketfd.fd_sem = sem_open(pathname_fd_sem, 1);
+				if (dsu_socketfd.fd_sem == SEM_FAILED) {
+					perror("DSU \"Error initializing semaphore for file descriptor\"");
+					exit(EXIT_FAILURE);
+				}
+
+
 				DSU_DEBUG_PRINT(" < Lock status %d (%d)\n", dsu_socketfd.port, (int) getpid());
 				if (sem_wait(dsu_socketfd.status_sem) == 0) {
 					
 					dsu_socketfd.version = dsu_socketfd.status[DSU_VERSION];
 					
 					/* 	Could be a delayed process. */
+					DSU_ALERT_PRINT(" - Group process id %d (%d)\n", getpgid(getpid()), (int) getpid());
 					if(dsu_socketfd.status[DSU_PGID] != getpgid(getpid())) 
 						++dsu_socketfd.version;
 					DSU_DEBUG_PRINT(" - version %d (%d)\n", dsu_socketfd.version, (int) getpid());
@@ -743,37 +775,49 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     
 	
 	/*	No other version running. */
-		 	
 	sem_unlink(pathname_status_sem); // Semaphore does not terminate after exit.
-    dsu_socketfd.status_sem = sem_open(pathname_status_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-    sem_init(dsu_socketfd.status_sem, PTHREAD_PROCESS_SHARED, 1);
+    dsu_socketfd.status_sem = sem_open(pathname_status_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 0);
+	if (dsu_socketfd.status_sem == SEM_FAILED) {
+		perror("DSU \"Error initializing semaphore for status\"");
+		exit(EXIT_FAILURE);
+	}
 
-	
+
 	sem_unlink(pathname_fd_sem); // Semaphore does not terminate after exit.
-    dsu_socketfd.fd_sem = sem_open(pathname_fd_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-    sem_init(dsu_socketfd.fd_sem, PTHREAD_PROCESS_SHARED, 1);
+    dsu_socketfd.fd_sem = sem_open(pathname_fd_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 0);
+	if (dsu_socketfd.fd_sem == SEM_FAILED) {
+		perror("DSU \"Error initializing semaphore for file descriptor\"");
+		exit(EXIT_FAILURE);
+	}
 
 
-	dsu_socketfd.monitoring = 1;
+	/* 	Initialize shared state. */
+	DSU_ALERT_PRINT(" - Group process id %d (%d)\n", getpgid(getpid()), (int) getpid());
+	dsu_socketfd.status[DSU_PGID] = getpgid(getpid());
+	dsu_socketfd.version = dsu_socketfd.status[DSU_VERSION] = 0;
+	dsu_socketfd.status[DSU_TRANSFER] = 0;
+	dsu_socketfd.transfer = 0;
+
 	
+	/*  Initialize local state. */
+	dsu_socketfd.monitoring = 1;
+	dsu_sockets_add(&dsu_program_state.binds, &dsu_socketfd);
 
-	DSU_DEBUG_PRINT(" < Lock status %d (%d)\n", dsu_socketfd.port, (int) getpid());
-	if (sem_wait(dsu_socketfd.status_sem) == 0) {
-		
-		dsu_socketfd.status[DSU_PGID] = getpgid(getpid());
-		dsu_socketfd.version = dsu_socketfd.status[DSU_VERSION] = 0;
-		dsu_socketfd.status[DSU_TRANSFER] = 0;
-		dsu_socketfd.transfer = 0;	
-		
-		DSU_DEBUG_PRINT(" > Unlock status %d (%d)\n", dsu_socketfd.port, (int) getpid());
-		sem_post(dsu_socketfd.status_sem);
+
+	/* 	Activate semaphore. */
+	if (sem_init(dsu_socketfd.fd_sem, PTHREAD_PROCESS_SHARED, 1) == -1) {
+		perror("DSU \"Error initializing semaphore\"");
+		exit(EXIT_FAILURE);
+	}
+
+	
+	/* 	Activate semaphore, allow new processes to continue. */
+    if (sem_init(dsu_socketfd.status_sem, PTHREAD_PROCESS_SHARED, 1) == -1) {
+		perror("DSU \"Error initializing semaphore\"");
+		exit(EXIT_FAILURE);
 	}
 	
 	
-	dsu_sockets_add(&dsu_program_state.binds, &dsu_socketfd);
-
-  	
-    
     return dsu_bind(sockfd, addr, addrlen);
 }
 
@@ -923,13 +967,15 @@ int fcntl(int fd, int cmd, char *argp) {
 	
 	} else if (cmd == F_SETFD) {
 		
-	
 		/* 	Set (Non-)blocking. */
-		if ( ! ((int) *argp & O_NONBLOCK) ) {
-			dsu_sockfd->blocking = 0; 
-		} else {
+		if ( ( ((int) *argp) & O_NONBLOCK) ) {
+			
 			dsu_sockfd->blocking = 1; 
+		} else {
+			dsu_sockfd->blocking = 0; 
 		}
+
+		DSU_DEBUG_PRINT(" - Blocking %d (%d)\n", dsu_sockfd->blocking, (int) getpid());
 
 
 	}

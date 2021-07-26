@@ -8,5 +8,10 @@
 #define DSU_DEBUG_PRINT(format, ...)
 #endif
 
+#ifdef ALERT
+#define DSU_ALERT_PRINT(format, ...) { fprintf(dsu_program_state.logfd, format, ## __VA_ARGS__); fflush(dsu_program_state.logfd);}
+#else
+#define DSU_ALERT_PRINT(format, ...)
+#endif
 
 #endif

@@ -136,7 +136,8 @@ wrk.o: wrk/wrk
 
 
 clean:
-	rm -rf lighttpd1.4 nginx apache etc
+	rm -rf lighttpd1.4 nginx apache etc wrk
 	rm -f nginx.o lighttpd.o apache.o httpd wrk.o
 	rm -f config/nginx.conf config/apache.conf config/lighttpd.conf
+	rm -f loss_of_service_updates.plt loss_of_service.plt comparison.txt
 

@@ -64,6 +64,11 @@ int main (int argc, char **argv) {
 			if(fds[i].revents == 0)
 				continue;
 
+			if(fds[i].revents & POLLNVAL) {
+				printf("Error\n");
+				exit(EXIT_FAILURE);
+			}
+
 			if(fds[i].revents != POLLIN) {
 				printf("  Error! revents = %d\n", fds[i].revents);
                 exit(EXIT_FAILURE);

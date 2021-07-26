@@ -9,7 +9,9 @@ CFLAGS	+= -g2
 CC?=gcc
 
 
-DEBUG= #-D DEBUG="\"$(log_dir)\""
+#DEBUG= -D DEBUG="\"$(log_dir)\""
+#DEBUG= -D ALERT="\"$(log_dir)\""
+DEBUG=
 
 
 SRCS:=$(wildcard *.c)
