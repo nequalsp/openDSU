@@ -9,6 +9,7 @@ CFLAGS	+= -g2
 CC?=gcc
 
 
+# Choose one of the three settings.
 #DEBUG= -D DEBUG="\"$(log_dir)\""
 #DEBUG= -D ALERT="\"$(log_dir)\""
 DEBUG=
@@ -26,7 +27,8 @@ EVENT_OBJS:=$(patsubst event_handlers/%.c, event_handlers/%.o,$(EVENT_SRCS))
 
 all: build 
 
-# core.o to trigger changes.
+
+# Added core.o to trigger build after changes.
 build: ../openDSU ../libopenDSU.so core.o ../log
 
 

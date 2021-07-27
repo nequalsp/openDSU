@@ -942,7 +942,7 @@ int fcntl(int fd, int cmd, char *argp) {
 
 	
 	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, fd);
-	if (dsu_sockfd == NULL) dsu_fcntl(fd, cmd, argp);
+	if (dsu_sockfd == NULL) return dsu_fcntl(fd, cmd, argp);
 
 	
 	if (cmd == F_DUPFD) {
