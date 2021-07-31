@@ -16,9 +16,13 @@ SRC1:=version_1
 SRCS1:=$(wildcard $(SRC1)/*.c)
 OBJS1:=$(patsubst $(SRC1)/%.c,$(SRC1)/%.o,$(SRCS1))
 
+SRCE:=experiment
+SRCSE:=$(wildcard $(SRCE)/*.c)
+OBJSE:=$(patsubst $(SRCE)/%.c,$(SRCE)/%.o,$(SRCSE))
+
 
 # Generate test files.
-test: $(OBJS0) $(OBJS1)
+test: $(OBJS0) $(OBJS1) $(OBJSE)
 
 $(SRC0)/%.o: $(SRC0)/%.c
 	$(CC) $(CFLAGS) $< -o $@ $(LIBS)
@@ -26,8 +30,12 @@ $(SRC0)/%.o: $(SRC0)/%.c
 $(SRC1)/%.o: $(SRC1)/%.c
 	$(CC) $(CFLAGS) $< -o $@ $(LIBS)
 
+$(SRCE)/%.o: $(SRCE)/%.c
+	$(CC) $(CFLAGS) $< -o $@ $(LIBS)
+
 clean:
 	rm -f $(OBJS0)
 	rm -f $(OBJS1)
+	rm -f $(OBJSE)
 	rm -rf $(SRC0)/__pycache__/
 	rm -rf $(SRC1)/__pycache__/

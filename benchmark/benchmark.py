@@ -52,7 +52,7 @@ if loss_of_service:
 
 		print('Start...')
 		subprocess.run(["openDSU", "./nginx.o"])
-		p = subprocess.Popen(["ab", "-g", "loss_of_service.plt", "-n", REQUESTS, "-c", "16", "http://localhost/v1.html"])
+		p = subprocess.Popen(["ab", "-g", "loss_of_service.plt", "-n", str(REQUESTS), "-c", "750", "http://localhost/v1.html"])
 		time.sleep(10)
 		
 		if os.fork() == 0:
@@ -85,7 +85,7 @@ if comparison:
 			f.write(webserver + "\n")
 			f.flush()
 			subprocess.run(["./" + webserver + ".o"] + flags[i])
-			subprocess.run(["./wrk.o", "-t", "4", "-c", "500", "-d", "30s", "http://localhost/v1.html"], stdout=f)
+			subprocess.run(["./wrk.o", "-t", "4", "-c", "32", "-d", "30s", "http://localhost/v1.html"], stdout=f)
 			subprocess.run(["pkill", webserver])
 			time.sleep(2)
 			
@@ -93,7 +93,7 @@ if comparison:
 			f.write("openDSU " + webserver + "\n")
 			f.flush()
 			subprocess.run(["openDSU", "./" + webserver + ".o"] + flags[i])
-			subprocess.run(["./wrk.o", "-t", "4", "-c", "500", "-d", "30s", "http://localhost/v1.html"], stdout=f)
+			subprocess.run(["./wrk.o", "-t", "4", "-c", "32", "-d", "30s", "http://localhost/v1.html"], stdout=f)
 			subprocess.run(["pkill", webserver])
 			time.sleep(2)
 			
@@ -154,28 +154,29 @@ with open("comparison.txt", "r") as f:
 
 
 
-fig, axes = plt.subplots(2, 1)
+fig, axes = plt.subplots(1, 1)
 
 
-axes[0].plot(df1['seconds'][5:], df1['ttime'][5:], 'k-', label='openDSU (Nginx)')
+plt.plot(df1['seconds'][5:], df1['ttime'][5:], 'k-', label='openDSU (Nginx)')
 
 
 maximum= max(df1['ttime'][5:])
 for index, row in df2.iterrows():
-	axes[0].plot([row['seconds'], row['seconds']], [0, maximum], 'k--') # Horizontal line
-axes[0].set_ylim((0,None))
-axes[0].set_xlabel('Duration (s)')
-axes[0].set_ylabel('Latency (ms)')
-axes[0].legend()
-axes[0].set_title(label="Running " + str(int(REQUESTS/max(df1['seconds']))) + " req/sec during " + str(UPDATES) + " updates")
+	plt.plot([row['seconds'], row['seconds']], [0, maximum], 'k--') # Horizontal line
+plt.ylim((0,None))
+plt.xlabel('Duration (s)')
+plt.ylabel('Latency (ms)')
+plt.legend()
+plt.title(label=str(int(REQUESTS/max(df1['seconds']))) + " req/sec during " + str(UPDATES) + " updates")
+
+print(data)
 
 
-
-tbl = axes[1].table(cellText=data, loc="center", colLoc='left', rowLoc='left', cellLoc='left', colLabels= ['', 'latency', 'req/sec'])
-axes[1].axis("off")
-axes[1].set_title(label="Comparison without implementation")
-tbl.auto_set_font_size(False)
-tbl.set_fontsize(14)
+#tbl = axes[1].table(cellText=data, loc="center", colLoc='left', rowLoc='left', cellLoc='left', colLabels= ['', 'latency', 'req/sec'])
+#axes[1].axis("off")
+#axes[1].set_title(label="Comparison without implementation")
+#tbl.auto_set_font_size(False)
+#tbl.set_fontsize(14)
 
 plt.show()
 

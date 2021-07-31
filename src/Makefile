@@ -10,9 +10,9 @@ CC?=gcc
 
 
 # Choose one of the three settings.
-#DEBUG= -D DEBUG="\"$(log_dir)\""
+DEBUG= -D DEBUG="\"$(log_dir)\""
 #DEBUG= -D ALERT="\"$(log_dir)\""
-DEBUG=
+#DEBUG=
 
 
 SRCS:=$(wildcard *.c)

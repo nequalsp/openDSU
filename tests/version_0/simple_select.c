@@ -45,29 +45,29 @@ int main (int argc, char **argv) {
 
 	/* -----------Test close function.------------ */
 	/* Create another the socket. */
-	struct sockaddr_in name2;
-	int sock2 = socket(PF_INET, SOCK_STREAM, 0);
-	if (sock2 < 0) {
-		perror ("Error creating socket");
-		exit (EXIT_FAILURE);
-	}
+	//struct sockaddr_in name2;
+	//int sock2 = socket(PF_INET, SOCK_STREAM, 0);
+	//if (sock2 < 0) {
+	//	perror ("Error creating socket");
+	//	exit (EXIT_FAILURE);
+	//}
 	/* Bind socket. */
-	name2.sin_family = AF_INET;
-	name2.sin_port = htons(PORT2);
-	name2.sin_addr.s_addr = htonl(INADDR_ANY);
-	if (bind(sock2, (struct sockaddr *) &name2, sizeof(name2)) < 0) {
-		perror("Error binding");
-		exit (EXIT_FAILURE);
-	}
+	//name2.sin_family = AF_INET;
+	//name2.sin_port = htons(PORT2);
+	//name2.sin_addr.s_addr = htonl(INADDR_ANY);
+	//if (bind(sock2, (struct sockaddr *) &name2, sizeof(name2)) < 0) {
+	//	perror("Error binding");
+	//	exit (EXIT_FAILURE);
+	//}
 
 	/* Listen on socket. */
-	if (listen(sock2, 1) < 0)
-    {
-      perror("Error start listening on socket");
-      exit(EXIT_FAILURE);
-    }
+	//if (listen(sock2, 1) < 0)
+    //{
+    //  perror("Error start listening on socket");
+    //  exit(EXIT_FAILURE);
+    //}
 
-	close(sock2);
+	//close(sock2);
 	/* ----------------------------------------- */
 
 	/* Initialize the set of active sockets. */
