@@ -33,7 +33,7 @@
 
 #include "event_handlers/select.h"
 //#include "event_handlers/poll.h"
-//#include "event_handlers/epoll.h"
+#include "event_handlers/epoll.h"
 
 
 /* 	Global variable containing pointers to the used data structures and state of the program. Every binded file descriptor
@@ -92,6 +92,10 @@ void dsu_send_fd(struct dsu_socket_list *dsu_sockfd) {
 	int comfd = accept4(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size, 0);	
 	if ( comfd != -1) {
 		
+		
+		++dsu_sockfd->status[DSU_TRANSFER];
+
+
 		DSU_DEBUG_PRINT("  - Write on %d (%d)\n", dsu_sockfd->comfd, (int) getpid());
     	if(dsu_write_fd(comfd, dsu_sockfd->fd) <= 0) goto end;		// Listening socket.
 		if(dsu_write_fd(comfd, dsu_sockfd->comfd) <= 0) goto end;	// Internal socket.
@@ -114,8 +118,8 @@ void dsu_termination() {
 		can either be done with threads or processes. As threads are implemented as processes on linux, 
 		there is not difference in termination. The number of active workers is tracked in the event handler. 
 		The last active worker that terminates, terminates the group to ensure the full application stops. */
-	
     
+	
 	DSU_DEBUG_PRINT(" < Lock program state (%d)\n", (int) getpid());
 	if (sem_wait(dsu_program_state.lock) == 0) {
 		
@@ -123,6 +127,12 @@ void dsu_termination() {
 		if (dsu_program_state.workers[0] == 0) {
 			DSU_DEBUG_PRINT("  - All (%d)\n", (int) getpid());
 			DSU_ALERT_PRINT("  - All (%d)\n", (int) getpid());
+
+			
+			DSU_DEBUG_PRINT(" > Unlock program state (%d)\n", (int) getpid());
+			sem_post(dsu_program_state.lock);
+
+			
 			killpg(getpgid(getpid()), SIGKILL);
 		}	
 		
@@ -303,16 +313,17 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_bind = dlsym(RTLD_NEXT, "bind");
 	dsu_close = dlsym(RTLD_NEXT, "close");
 	
+
 	/* 	Set default function for event-handler wrapper functions. */
 	dsu_select = dlsym(RTLD_NEXT, "select");
 	dsu_pselect = dlsym(RTLD_NEXT, "pselect");
 	//dsu_poll = dlsym(RTLD_NEXT, "poll");
 	//dsu_ppoll = dlsym(RTLD_NEXT, "ppoll");
-	//dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
-	//dsu_epoll_pwait = dlsym(RTLD_NEXT, "epoll_pwait");
-	//dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
-	//dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
-	//dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
+	dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
+	dsu_epoll_pwait = dlsym(RTLD_NEXT, "epoll_pwait");
+	dsu_epoll_pwait2 = dlsym(RTLD_NEXT, "epoll_pwait2");
+	dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
+
 
     return;
 }
@@ -329,7 +340,7 @@ void dsu_init_sem_status(struct dsu_socket_list *dsu_socketfd, int first) {
 		sem_unlink(pathname_status_sem);
 		dsu_socketfd->status_sem = sem_open(pathname_status_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 0);
 	} else {
-		dsu_socketfd->status_sem = sem_open(pathname_status_sem, 1);
+		dsu_socketfd->status_sem = sem_open(pathname_status_sem, 0);
 	}
 
 	if (dsu_socketfd->status_sem == SEM_FAILED) {
@@ -350,9 +361,10 @@ void dsu_init_sem_fd(struct dsu_socket_list *dsu_socketfd, int first) {
 		sem_unlink(pathname_fd_sem); // Semaphore does not terminate after exit.
     	dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 0);
 	} else {
-		dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, 1);
+		dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, 0);
 	}
 		
+
 	if (dsu_socketfd->fd_sem == SEM_FAILED) {
 		perror("DSU \"Error initializing semaphore for file descriptor\"");
 		exit(EXIT_FAILURE);
@@ -387,6 +399,9 @@ void dsu_init_fd(struct dsu_socket_list *dsu_socketfd, const struct sockaddr *ad
 	//	perror("mod");			// protect
 
 
+	dsu_socketfd->lock = open("/tmp/dsu_lock", O_RDONLY | O_CREAT, 0600);
+
+
 	/*  To communicate the status between the process, shared memory is used. */
     int pathname_size = snprintf(NULL, 0, "/%s_%d", DSU_COMM, dsu_socketfd->port);
     char pathname[pathname_size+1];
@@ -401,10 +416,17 @@ void dsu_init_fd(struct dsu_socket_list *dsu_socketfd, const struct sockaddr *ad
 		exit(EXIT_FAILURE);
 	}
 	dsu_socketfd->status = (int *) mmap(NULL, 3*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
+	
+	
 	if (dsu_socketfd->status == (void *) -1) {
 		perror("DSU \"Error creating shared memory\"");
 		exit(EXIT_FAILURE);
 	}
+
+
+	dsu_socketfd->status[DSU_PGID] = 0;
+	dsu_socketfd->status[DSU_VERSION] = 0;
+	dsu_socketfd->status[DSU_TRANSFER] = 0;
 
 }
 
@@ -545,13 +567,13 @@ int close(int sockfd) {
 			2.	Binded sockets 		-> 	dsu_program_State.binds
 			3.	Internal sockets	-> 	dsu_program_State.binds->comfd | dsu_program_State.binds->fds
 			4.	Connected clients	-> 	dsu_program_state.accepted	*/
-	
-		
-	/* 	Return immediately for these file descriptors. */
-    if (sockfd == STDIN_FILENO || sockfd == STDOUT_FILENO || sockfd == STDERR_FILENO) {
-        return dsu_close(sockfd);
-    }
 
+	
+	/*	Epoll is active, close also deletes from the epoll list. */
+	if (dsu_epoll_fds != NULL) {
+		dsu_socket_remove_fds(&dsu_epoll_fds, sockfd);
+	}
+		
 
 	struct dsu_socket_list *dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
 	if (dsu_socketfd != NULL) {
@@ -560,7 +582,7 @@ int close(int sockfd) {
 		return dsu_close(sockfd);
 	}
 
-
+	
 	return dsu_close(sockfd);
 
 }

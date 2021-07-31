@@ -20,7 +20,7 @@ int (*dsu_pselect)(int, fd_set *, fd_set *, fd_set *, const struct timespec *, c
 
 int dsu_correction_select = 0;
 int dsu_max_fds = 0;
-int dsu_transfer_select = 0;
+int dsu_select_transfer = 0;
 fd_set dsu_zero;
 
 
@@ -77,25 +77,31 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			if (sem_wait(dsu_sockfd->status_sem) == 0) {
 			
 
-                if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_transfer_select = 1;
+                if (dsu_sockfd->status[DSU_TRANSFER] > 0) dsu_select_transfer = 1;
 
                 
                 /*  Only one process can monitor a blocking socket. During transfer use lock. */
-				if (dsu_sockfd->status[DSU_TRANSFER] > 0 && fcntl(dsu_sockfd->fd, F_GETFL, 0) & O_NONBLOCK ) {
+				if (dsu_sockfd->status[DSU_TRANSFER] > 0 && !(fcntl(dsu_sockfd->fd, F_GETFL, 0) & O_NONBLOCK) ) {
 					
                     
 					DSU_DEBUG_PRINT(" - Try lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-					if (sem_trywait(dsu_sockfd->fd_sem) != 0) {
+					if (sem_trywait(dsu_sockfd->fd_sem) == 0) {
 						
+
+						DSU_DEBUG_PRINT(" - Lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+						dsu_sockfd->locked = DSU_LOCKED;
+
+						
+						
+
+					} else {
+
 
 						DSU_DEBUG_PRINT(" - Remove fd %d (%d-%d)\n", dsu_sockfd->fd, (int) getpid(), (int) gettid());
 						FD_CLR(dsu_sockfd->fd, readfds);
-						
+
 
 					}
-
-					DSU_DEBUG_PRINT(" - Lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-					dsu_sockfd->locked = DSU_LOCKED;
 
 				
 				}
@@ -136,7 +142,7 @@ int fpselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, con
 
     /*  This will be marked to 1 if one of the sockets is transfering a file descriptor, this is used to activate locking
         and decrease the timeout. */
-	dsu_transfer_select = 0;
+	dsu_select_transfer = 0;
 	
 
     #ifdef DEBUG
@@ -157,7 +163,7 @@ int fpselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, con
 
 	
 	FD_ZERO(&dsu_zero);
-	if ( !memcmp(&dsu_zero, readfds, sizeof(dsu_zero)) ) dsu_deactivate_process();
+	if (!memcmp(&dsu_zero, readfds, sizeof(dsu_zero)) && dsu_select_transfer == 0) DSU_DEACTIVATE;
 
 
 	DSU_TERMINATION;
@@ -222,7 +228,7 @@ int rpselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, con
 
 	const struct timespec ts = {.tv_sec = 0, .tv_nsec = 500000 /* 500 microseconds (usec). */ };
 	const struct timespec *ps = timeout;
-	if (dsu_transfer_select == 1) {
+	if (dsu_select_transfer == 1) {
 		ps = &ts;
 	}
 

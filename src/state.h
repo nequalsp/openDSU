@@ -31,9 +31,14 @@ struct dsu_socket_list {
 	
 
 	/* 	Multi- process & threading. */
+	int lock;
 	sem_t *fd_sem;					// Exclusive listening on file descriptor.
 	sem_t *status_sem;				// Shared memory write lock.
     int *status;					// Shared memory.
+
+
+	/*	Epoll. */
+	struct epoll_event ev;
 
 
 	struct dsu_socket_list *next;
@@ -66,6 +71,16 @@ struct dsu_state_struct {
 };
 
 
+struct dsu_fd_list {
+    
+
+	int fd;
+    
+
+	struct dsu_fd_list *next;
+};
+
+
 #define dsu_forall_sockets(x, y, ...) { struct dsu_socket_list *dsu_socket_loop = x;\
                                         while (dsu_socket_loop != NULL) {\
                                             (*y)(dsu_socket_loop, ## __VA_ARGS__);\
@@ -88,6 +103,12 @@ void dsu_sockets_remove_fd(struct dsu_socket_list **head, int sockfd);
 
 /* 	Search for shadow datastructure based on file descriptor. */
 struct dsu_socket_list *dsu_sockets_search_fd(struct dsu_socket_list *head, int fd);
+
+
+void dsu_socket_add_fds(struct dsu_fd_list **node, int fd);
+
+
+void dsu_socket_remove_fds(struct dsu_fd_list **node, int fd);
 
 
 #endif

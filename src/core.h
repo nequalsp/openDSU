@@ -33,6 +33,7 @@ extern struct dsu_state_struct dsu_program_state;
 
 
 void dsu_activate_process(void);
+#define DSU_DEACTIVATE dsu_deactivate_process()
 void dsu_deactivate_process(void);
 #define DSU_TERMINATION dsu_termination()
 void dsu_termination(void);
