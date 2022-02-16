@@ -5,17 +5,10 @@
 #include "state.h"
 
 
-#ifdef DEBUG
-#define DSU_DEBUG 1
-#else
-#define DSU_DEBUG 0
-#endif
-
-
 #define HAVE_MSGHDR_MSG_CONTROL 1   // Look this up. !!!!!
 
 
-#if DSU_DEBUG == 1
+#ifdef DEBUG
 #define DSU_DEBUG_PRINT(format, ...) { fprintf(dsu_program_state.logfd, format, ## __VA_ARGS__); fflush(dsu_program_state.logfd);}
 #else
 #define DSU_DEBUG_PRINT(format, ...)
@@ -43,10 +36,6 @@
 #define DSU_COMM "dsu_com"
 #define DSU_COMM_LEN 14
 #define DSU_MAXNUMOFPROC 5
-
-
-#define DSU_LOG "/var/log/dsu"
-#define DSU_LOG_LEN 12
 
 
 extern struct dsu_state_struct dsu_program_state;

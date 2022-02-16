@@ -1,10 +1,15 @@
+mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
+current_dir := $(dir $(mkfile_path))
+log_dir	:= $(current_dir)../log
+
+
 CFLAGS	+= -Wall -Werror
 CFLAGS	+= -O3
 CFLAGS	+= -g2
 CC?=gcc
 
 
-DEBUG= -D DEBUG	
+DEBUG= -D DEBUG="\"$(log_dir)\""	
 
 
 SRCS:=$(wildcard *.c)
@@ -20,7 +25,7 @@ EVENT_OBJS:=$(patsubst event_handlers/%.c, event_handlers/%.o,$(EVENT_SRCS))
 all: build 
 
 # core.o to trigger changes.
-build: ../openDSU ../libopenDSU.so core.o
+build: ../openDSU ../libopenDSU.so core.o ../log
 
 
 ../libopenDSU.so: $(OBJS) $(EVENT_OBJS)
@@ -31,10 +36,14 @@ build: ../openDSU ../libopenDSU.so core.o
 	$(CC) $(CFLAGS) $< -o $@
 
 
+../log:
+	mkdir -p ../log
+
+
 %.o: %.c
 	$(CC) $(CFLAGS) -c -fPIC $< -o $@ $(DEBUG)
 
 
 clean:
-	rm -rf $(OBJS) $(EVENT_OBJS) ../libopenDSU.so ../openDSU core.o
+	rm -rf $(OBJS) $(EVENT_OBJS) ../libopenDSU.so ../openDSU core.o $(log_dir)
 

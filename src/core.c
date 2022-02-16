@@ -323,15 +323,15 @@ static __attribute__((constructor)) void dsu_init() {
 	/*	LD_Preload constructor is called before the binary starts. Initialze the program state. */
 	
 
-	#if DSU_DEBUG == 1
-    int size = snprintf(NULL, 0, "%s_%d.log", DSU_LOG, (int) getpid());
-	char logfile[size+1];	
-	sprintf(logfile, "%s_%d.log", DSU_LOG, (int) getpid());
-	dsu_program_state.logfd = fopen(logfile, "w");
-	if (dsu_program_state.logfd == NULL) {
-		perror("DSU \"Error opening debugging file\"");
-		exit(EXIT_FAILURE);
-	}
+	#if defined(DEBUG)
+		int size = snprintf(NULL, 0, "%s/dsu_%d.log", DEBUG, (int) getpid());
+		char logfile[size+1];
+		sprintf(logfile, "%s/dsu_%d.log", DEBUG, (int) getpid());
+	    dsu_program_state.logfd = fopen(logfile, "w");
+	    if (dsu_program_state.logfd == NULL) {
+		    perror("DSU \"Error opening debugging file\"");
+		    exit(EXIT_FAILURE);
+	    }
 	#endif
 	DSU_DEBUG_PRINT("INIT() (%d-%d)\n", (int) getpid(), (int) gettid());
 

@@ -67,7 +67,7 @@ clean:
 	$(MAKE) -C ./tests clean
 	$(MAKE) -C ./src clean
 	#$(MAKE) -C ./benchmark clean
-	rm -f /var/log/dsu_*
+	#rm -f /var/log/dsu_*
 	
 
 
