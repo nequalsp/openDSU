@@ -169,8 +169,9 @@ void dsu_terminate() {
 	}
 
 
+    DSU_DEBUG_PRINT("  - worker: %d (pg:%d, pid:%d, tid:%d)\n", workers, (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 	if (workers == 0) {
-		DSU_DEBUG_PRINT("  - All (%d-%d)\n", (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT("  - All (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 		killpg(getpgid(getpid()), SIGKILL);
 	}
 
