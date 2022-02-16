@@ -1,13 +1,22 @@
 tests/__pycache__
 tests/version_0/__pycache__
 tests/version_1/__pycache__
+tests/version_0/*.o
+tests/version_1/*.o
 *.o
 *.so
+openDSU
+benchmark/wrk
 benchmark/nginx
 benchmark/apache
-benchmark/lighttpd
+benchmark/lighttpd1.4
 benchmark/nginx.o
 benchmark/apache.o
 benchmark/lighttpd.o
 benchmark/etc
+benchmark/config/apache.conf
+benchmark/config/lighttpd.conf
+benchmark/config/nginx.conf
+benchmark/loss_of_service.plt
+benchmark/loss_of_service_updates.plt
 
