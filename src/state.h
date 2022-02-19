@@ -31,11 +31,15 @@ struct dsu_fd_list {
 /*  Linked list for shadow datastructures of the file descriptors. */
 struct dsu_socket_list {
     
-
+	
 	int fd;
-	struct dsu_fd_list *fds;		// Accepted connections.
-    int shadowfd;
+	int shadowfd;
     int port;
+	
+	
+	struct dsu_fd_list *fds;		// Accepted connections.
+    
+	
 	struct epoll_event ev;			// Needed in Epoll.
     
 
@@ -45,19 +49,23 @@ struct dsu_socket_list {
 	struct dsu_fd_list *comfds;		// File descriptors of acccepted internal connections.
     int comfd;						// File descriptor for listening for internal connections.
 	
+	
+	struct sockaddr_un readyfd_addr;
+	int readyfd;					// File descriptor for listening for ready signal.
+	
 
     /*  Status. */
-	int monitoring;
-	int version;
-	int locked;
-	int transfer;
-    int blocking;
+	//int monitoring;
+	//int version;
+	//int locked;
+	//int transfer;
+    //int blocking;
 	
 
 	/* 	Multi- process & threading. */
-	sem_t *status_sem;
-	sem_t *fd_sem;	
-    int *status;
+	//sem_t *status_sem;
+	//sem_t *fd_sem;	
+    //int *status;
 
 
 	struct dsu_socket_list *next;
@@ -80,9 +88,9 @@ struct dsu_state_struct {
     
 	
 	/* Termination information. */
-	int live;
-	int *workers;
-	sem_t *lock;
+	//int live;
+	//int *workers;
+	//sem_t *lock;
 
 
 };

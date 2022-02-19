@@ -35,6 +35,9 @@
 
 #define DSU_COMM "dsu_com"
 #define DSU_COMM_LEN 14
+#define DSU_READY "dsu_ready"
+#define DSU_READY_LEN 16
+
 #define DSU_MAXNUMOFPROC 5
 
 
@@ -42,8 +45,8 @@ extern struct dsu_state_struct dsu_program_state;
 
 
 int dsu_request_fd(struct dsu_socket_list *dsu_sockfd);
-int dsu_termination_detection();
-void dsu_terminate();
+//int dsu_termination_detection();
+//void dsu_terminate();
 int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd);
 void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd);
 void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd);

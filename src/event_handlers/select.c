@@ -16,7 +16,7 @@
 int (*dsu_select)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 int correction = 0;
 int max_fds = 0;
-int transfer = 0;
+//int transfer = 0;
 
 void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Listen under the hood to accepted connections on public socket. A new generation can request
@@ -26,12 +26,13 @@ void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	/*	HACK if readfds is NULL TO DO set in program state so that malloc can be called and it will be removed. */
 	if (readfds == NULL) return;
 	
-	if (dsu_sockfd->monitoring) {
+	//if (dsu_sockfd->monitoring) {
 		DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
 		
 		FD_SET(dsu_sockfd->comfd, readfds);
-		if (max_fds < dsu_sockfd->comfd + 1) max_fds = dsu_sockfd->comfd + 1;
-	}
+		FD_SET(dsu_sockfd->readyfd, readfds);
+		if (max_fds < dsu_sockfd->comfd + 2) max_fds = dsu_sockfd->comfd + 2;
+	//}
 	
     
 	/* Contains zero or more accepted connections. */
@@ -124,20 +125,20 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
                 port = -1;
             
             
-			if (port != -1) {
+			//if (port != -1) {
 				
-				DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-				sem_wait(dsu_sockfd->status_sem);
-				DSU_DEBUG_PRINT(" - DSU_TRANSFER %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+				//DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+				//sem_wait(dsu_sockfd->status_sem);
+				//DSU_DEBUG_PRINT(" - DSU_TRANSFER %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 				/* Possible multiple processes respond to requests. */
-				if (dsu_sockfd->transfer == 0) {++dsu_sockfd->status[DSU_TRANSFER]; dsu_sockfd->transfer = 1;}
-				DSU_DEBUG_PRINT(" - Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-				sem_post(dsu_sockfd->status_sem);
+				//if (dsu_sockfd->transfer == 0) {++dsu_sockfd->status[DSU_TRANSFER]; dsu_sockfd->transfer = 1;}
+				//DSU_DEBUG_PRINT(" - Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+				//sem_post(dsu_sockfd->status_sem);
 				
-			}
+			//}
 
 			
-            DSU_DEBUG_PRINT(" - Send file descriptors on %d (%d-%d)\n", comfds->fd, (int) getpid(), (int) gettid());
+            DSU_DEBUG_PRINT(" - Send file descriptors %d & %d on %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->comfd, comfds->fd, (int) getpid(), (int) gettid());
             dsu_write_fd(comfds->fd, dsu_sockfd->shadowfd, port); // handle return value;
 			dsu_write_fd(comfds->fd, dsu_sockfd->comfd, port);
 			
@@ -161,35 +162,35 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 		FD_CLR(dsu_sockfd->fd, readfds);
 
 
-		if (dsu_sockfd->monitoring) { 
+		//if (dsu_sockfd->monitoring) { 
 			
 
-			DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-			if (sem_wait(dsu_sockfd->status_sem) == 0) {
+			//DSU_DEBUG_PRINT(" - Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+			//if (sem_wait(dsu_sockfd->status_sem) == 0) {
 			
-                if (dsu_sockfd->status[DSU_TRANSFER] > 0) transfer = 1;
+            //    if (dsu_sockfd->status[DSU_TRANSFER] > 0) transfer = 1;
                 
                 /*  Only one process can monitor a blocking socket. During transfer use lock. */
-				if (transfer && dsu_sockfd->blocking) {
+			//	if (transfer && dsu_sockfd->blocking) {
 					
                     
-					DSU_DEBUG_PRINT(" - Try lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-					if (sem_trywait(dsu_sockfd->fd_sem) == 0) {
+			//		DSU_DEBUG_PRINT(" - Try lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+			//		if (sem_trywait(dsu_sockfd->fd_sem) == 0) {
 						
 
-						DSU_DEBUG_PRINT(" - Lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-						dsu_sockfd->locked = DSU_LOCKED;
+			//			DSU_DEBUG_PRINT(" - Lock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+			//			dsu_sockfd->locked = DSU_LOCKED;
 
 						
 						/*  Set shadow file descriptor. */
-						DSU_DEBUG_PRINT(" - Set %d => %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
-						FD_SET(dsu_sockfd->shadowfd, readfds);
-						if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
+			//			DSU_DEBUG_PRINT(" - Set %d => %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
+			//			FD_SET(dsu_sockfd->shadowfd, readfds);
+			//			if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
 
-					}
+			//		}
 
 				
-				} else {
+			//	} else {
 				
 				
 					/*  Set shadow file descriptor. */
@@ -197,13 +198,13 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 					FD_SET(dsu_sockfd->shadowfd, readfds);
 					if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
 
-				}
+			//	}
 			
 
-				DSU_DEBUG_PRINT(" - Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-				sem_post(dsu_sockfd->status_sem);
-			}
-		}
+			//	DSU_DEBUG_PRINT(" - Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+			//	sem_post(dsu_sockfd->status_sem);
+			//}
+		//}
     }
 }
 
@@ -212,14 +213,13 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Change shadow file descripter to its original file descriptor. */
 
 
-    if (dsu_sockfd->locked == DSU_LOCKED) {
-        DSU_DEBUG_PRINT(" - Unlock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-        sem_post(dsu_sockfd->fd_sem);
-        dsu_sockfd->locked = DSU_UNLOCKED;
-    }
-
-    
-    if (readfds != NULL && FD_ISSET(dsu_sockfd->shadowfd, readfds)) {
+    //if (dsu_sockfd->locked == DSU_LOCKED) {
+    //    DSU_DEBUG_PRINT(" - Unlock fd %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+    //    sem_post(dsu_sockfd->fd_sem);
+    //    dsu_sockfd->locked = DSU_UNLOCKED;
+    //}
+	
+    if (readfds != NULL && FD_ISSET(dsu_sockfd->shadowfd, readfds) ) { // && !FD_ISSET(dsu_sockfd->readyfd, readfds) ) {
 		DSU_DEBUG_PRINT(" - Reset %d => %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->fd, (int) getpid(), (int) gettid());
         FD_CLR(dsu_sockfd->shadowfd, readfds);
         FD_SET(dsu_sockfd->fd, readfds);
@@ -247,7 +247,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 
     /*  This will be marked to 1 if one of the sockets is transfering a file descriptor, this is used to activate locking
         and decrease the timeout. */
-	transfer = 0;
+	//transfer = 0;
 	
 
     #if DSU_DEBUG == 1
@@ -259,23 +259,23 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	
 
 	/* 	On first call to select, mark worker active and configure binded sockets. */
-	if (!dsu_program_state.live) {	
+	//if (!dsu_program_state.live) {	
 		
-		dsu_activate_process();
-		dsu_configure_process();
+	//	dsu_activate_process();
+	//	dsu_configure_process();
 		
 		/*	Process is initialized. */
-		dsu_program_state.live = 1;
-	}
+	//	dsu_program_state.live = 1;
+	//}
 	
 
 	/* 	Mark version of the file descriptors. */
-	dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
+	//dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
     
 
-	if (dsu_termination_detection()) {
-		dsu_terminate();
-	}
+	//if (dsu_termination_detection()) {
+	//	dsu_terminate();
+	//}
 	
 
     /*  Convert to shadow file descriptors, this must be done for binded sockets. */
@@ -287,9 +287,9 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 
 
 	/* To support non-blocking sockets, narrow down the time between locks. */
-	struct timeval tv; struct timeval *ptv = &tv;
-	if (transfer == 1) {tv.tv_sec = 0; tv.tv_usec = 100;}
-	else {ptv = timeout;}
+	//struct timeval tv; struct timeval *ptv = &tv;
+	//if (transfer == 1) {tv.tv_sec = 0; tv.tv_usec = 100;}
+	//else {ptv = timeout;}
 
 
 	#if DSU_DEBUG == 1
@@ -301,7 +301,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	#endif
 
 
-    int result = dsu_select(max_fds, readfds, writefds, exceptfds, ptv);
+    int result = dsu_select(max_fds, readfds, writefds, exceptfds, timeout);
     if (result == -1) {
 		DSU_DEBUG_PRINT(" - error: (%d-%d)\n", (int) getpid(), (int) gettid());
 		return result;

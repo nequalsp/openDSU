@@ -30,8 +30,8 @@
 #include "file.h"
 
 #include "event_handlers/select.h"
-#include "event_handlers/poll.h"
-#include "event_handlers/epoll.h"
+//#include "event_handlers/poll.h"
+//#include "event_handlers/epoll.h"
 
 
 /* 	Global variable containing pointers to the used data structures and state of the program. Every binded file descriptor
@@ -105,50 +105,50 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 }
 
 
-int dsu_termination_detection() {
+//int dsu_termination_detection() {
 	/*	Determine based on the global programming state whether it is possible to terminate. A version cannot terminate if:
 		1.	One socket did not increase version.
 		2.	A socket is still actively monitored.
 		3.	The singlely linked list comdfd still contains open connections between different versions.
 		4.	The singlely linked list fds still contains open connections with clients. */
 	
-	DSU_DEBUG_PRINT(" - Termination detection (%d-%d)\n", (int) getpid(), (int) gettid());
+//	DSU_DEBUG_PRINT(" - Termination detection (%d-%d)\n", (int) getpid(), (int) gettid());
 	
-	struct dsu_socket_list *current = dsu_program_state.binds;
+//	struct dsu_socket_list *current = dsu_program_state.binds;
 
-	while (current != NULL) {
+//	while (current != NULL) {
 		
 		/* 	In case of error do not terminate. */
-		int version = current->version;
+//		int version = current->version;
 		
-		DSU_DEBUG_PRINT("  < Lock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
-		if (sem_wait(current->status_sem) == 0) {
+//		DSU_DEBUG_PRINT("  < Lock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
+//		if (sem_wait(current->status_sem) == 0) {
 		
-			version = current->status[DSU_VERSION];
+//			version = current->status[DSU_VERSION];
 
-			DSU_DEBUG_PRINT("  > Unlock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
-			sem_post(current->status_sem);
-		}
+//			DSU_DEBUG_PRINT("  > Unlock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
+//			sem_post(current->status_sem);
+//		}
 
 		
-		if (	current->version >= version
-			|| 	current->monitoring != 0
-			||  current->comfds != NULL
-			||	current->fds != NULL
-			 )
-			return 0;	
+//		if (	current->version >= version
+//			|| 	current->monitoring != 0
+//			||  current->comfds != NULL
+//			||	current->fds != NULL
+//			 )
+//			return 0;	
 
-		current = current->next;
+//		current = current->next;
 
-	}
+//	}
 	
-	return 1;
+//	return 1;
 
-}
+//}
 
 
-void dsu_terminate() {
-	DSU_DEBUG_PRINT(" - Termination (%d-%d)\n", (int) getpid(), (int) gettid());
+//void dsu_terminate() {
+//	DSU_DEBUG_PRINT(" - Termination (%d-%d)\n", (int) getpid(), (int) gettid());
 	/*	Different models, such as master-worker model, are used to horizontally scale the application. This
 		can either be done with threads or processes. As threads are implemented as processes on linux, 
 		there is not difference in termination. The number of active workers is tracked in the event handler. 
@@ -156,49 +156,48 @@ void dsu_terminate() {
 	
     
 	/* 	In case of error do not terminate all processes. */
-	int workers  = 1;
+//	int workers  = 1;
 	
     
-	DSU_DEBUG_PRINT(" < Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-	if (sem_wait(dsu_program_state.lock) == 0) {
+//	DSU_DEBUG_PRINT(" < Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+//	if (sem_wait(dsu_program_state.lock) == 0) {
 		
-		workers = --dsu_program_state.workers[0];	
+//		workers = --dsu_program_state.workers[0];	
 			
-		DSU_DEBUG_PRINT(" > Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-		sem_post(dsu_program_state.lock);
-	}
+//		DSU_DEBUG_PRINT(" > Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+//		sem_post(dsu_program_state.lock);
+//	}
 
 
-    DSU_DEBUG_PRINT("  - worker: %d (pg:%d, pid:%d, tid:%d)\n", workers, (int) getpgid(getpid()), (int) getpid(), (int) gettid());
-	if (workers == 0) {
-		DSU_DEBUG_PRINT("  - All (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
-		killpg(getpgid(getpid()), SIGKILL);
-	}
+//    DSU_DEBUG_PRINT("  - worker: %d (pg:%d, pid:%d, tid:%d)\n", workers, (int) getpgid(getpid()), (int) getpid(), (int) gettid());
+//	if (workers == 0) {
+//		DSU_DEBUG_PRINT("  - All (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
+//		killpg(getpgid(getpid()), SIGKILL);
+//	}
 
 
-	exit(EXIT_SUCCESS);
+//	exit(EXIT_SUCCESS);
 
-}
+//}
 
 
-void dsu_activate_process(void) {
+//void dsu_activate_process(void) {
 		
-	DSU_DEBUG_PRINT(" < Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-	if( sem_wait(dsu_program_state.lock) == 0) {
+//	DSU_DEBUG_PRINT(" < Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+//	if( sem_wait(dsu_program_state.lock) == 0) {
 		
-		++dsu_program_state.workers[0];
+//		++dsu_program_state.workers[0];
 
-		DSU_DEBUG_PRINT(" > Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-		sem_post(dsu_program_state.lock);
-	}
+//		DSU_DEBUG_PRINT(" > Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
+//		sem_post(dsu_program_state.lock);
+//	}
 	
-}
+//}
 
 
-void dsu_configure_process(void) {
-	
-	dsu_forall_sockets(dsu_program_state.binds, dsu_configure_socket);
-}
+//void dsu_configure_process(void) {
+//	dsu_forall_sockets(dsu_program_state.binds, dsu_configure_socket);
+//}
 
 
 			
@@ -235,94 +234,93 @@ int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
 }
 
 
-void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
-	DSU_DEBUG_PRINT(" - Monitor on %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+//void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd) {
+//	DSU_DEBUG_PRINT(" - Monitor on %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
 	/*	Act on the state, in shared memory, accourding to the flow. If processes noticed that the verison of a file descriptor
 		increased, it could stop listening on this file descriptor. When its version is higher than the current version, update 
 		the version (this is done after starting to listen on the socket). Because shared memory is updates, lock is required.  */
 
 	
-	DSU_DEBUG_PRINT("  < Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-	if (sem_wait(dsu_sockfd->status_sem) == 0) {
+//	DSU_DEBUG_PRINT("  < Lock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+//	if (sem_wait(dsu_sockfd->status_sem) == 0) {
 
 
-		if (	dsu_sockfd->version < dsu_sockfd->status[DSU_VERSION] 
-			&&	dsu_sockfd->monitoring
-			&&	!dsu_sockfd->locked
-		) {
+//		if (	dsu_sockfd->version < dsu_sockfd->status[DSU_VERSION] 
+//			&&	dsu_sockfd->monitoring
+//			&&	!dsu_sockfd->locked
+//		) {
 			
-			DSU_DEBUG_PRINT("  - Quit monitoring  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-			dsu_close(dsu_sockfd->comfd);
-			dsu_sockfd->monitoring = 0;
-			--dsu_sockfd->status[DSU_TRANSFER];
-			dsu_sockfd->transfer = 0;
+//			DSU_DEBUG_PRINT("  - Quit monitoring  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+//			dsu_close(dsu_sockfd->comfd);
+//			dsu_sockfd->monitoring = 0;
+//			--dsu_sockfd->status[DSU_TRANSFER];
+//			dsu_sockfd->transfer = 0;
 		
-		}
+//		}
 
 
-		if (	dsu_sockfd->version > dsu_sockfd->status[DSU_VERSION]
-			&&	dsu_sockfd->monitoring) {
+//		if (	dsu_sockfd->version > dsu_sockfd->status[DSU_VERSION]
+//			&&	dsu_sockfd->monitoring) {
 			
-			DSU_DEBUG_PRINT("  - Increase version  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());				
-			dsu_sockfd->status[DSU_PGID] = getpgid(getpid());
-			++dsu_sockfd->status[DSU_VERSION];
+//			DSU_DEBUG_PRINT("  - Increase version  %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());				
+//			dsu_sockfd->status[DSU_PGID] = getpgid(getpid());
+//			++dsu_sockfd->status[DSU_VERSION];
 			
-		}
+//		}
 	
 		
-		DSU_DEBUG_PRINT("  > Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
-		sem_post(dsu_sockfd->status_sem);
+//		DSU_DEBUG_PRINT("  > Unlock status %d (%d-%d)\n", dsu_sockfd->port, (int) getpid(), (int) gettid());
+//		sem_post(dsu_sockfd->status_sem);
 	
-	}
-}
+//	}
+//}
 
 
-int dsu_is_blocking(int fd) {
+//int dsu_is_blocking(int fd) {
     
-    int flags = dsu_fcntl(fd, F_GETFL, 0);
-    if ( (flags & O_NONBLOCK) ) return 0;
+//    int flags = dsu_fcntl(fd, F_GETFL, 0);
+//    if ( (flags & O_NONBLOCK) ) return 0;
 
-    return 1;
+//    return 1;
 
-}
+//}
 
 
-void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd) {
+//void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd) {
 
-    dsu_sockfd->blocking = dsu_is_blocking(dsu_sockfd->shadowfd);
+//    dsu_sockfd->blocking = dsu_is_blocking(dsu_sockfd->shadowfd);
     
-}
+//}
 
 
-#define DSU_INITIALIZE_EVENT dsu_initialize_event()
-void dsu_initialize_event(void) {
+//#define DSU_INITIALIZE_EVENT dsu_initialize_event()
+//void dsu_initialize_event(void) {
 	
 	/* 	On first call event handler call, mark worker active and configure binded sockets. */
-	if (!dsu_program_state.live) {	
+	//if (!dsu_program_state.live) {	
 		
-		dsu_activate_process();
-		dsu_configure_process();
+	//	dsu_activate_process();
+	//	dsu_configure_process();
 		
 		/*	Process is initialized. */
-		dsu_program_state.live = 1;
-	}
-	
+	//	dsu_program_state.live = 1;
+	//	}
+	//
 	
 	/* 	State handler binded sockets. */
-	dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
+	//dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
 
 	
 	/* 	Termination detection & execution. */
-	if (dsu_termination_detection()) {
-		dsu_terminate();
-	}
+	//if (dsu_termination_detection()) {
+	//	dsu_terminate();
+	//}
 	
-}
+//}
 
 
 static __attribute__((constructor)) void dsu_init() {
 	/*	LD_Preload constructor is called before the binary starts. Initialze the program state. */
-	
 
 	#if defined(DEBUG)
 		int size = snprintf(NULL, 0, "%s/dsu_%d.log", DEBUG, (int) getpid());
@@ -341,46 +339,46 @@ static __attribute__((constructor)) void dsu_init() {
     dsu_program_state.binds = NULL;
 
 			
-	dsu_program_state.live = 0;
+	//dsu_program_state.live = 0;
 	
 
 	/* 	Create shared memory, to trace number of active worker processes. */
-    int pathname_size = snprintf(NULL, 0, "/%s_%d.state", DSU_COMM, (int) getpgid(getpid()));
-    char pathname[pathname_size+1];
-    sprintf(pathname, "/%s_%d.state", DSU_COMM, (int) getpgid(getpid()));
+    //int pathname_size = snprintf(NULL, 0, "/%s_%d.state", DSU_COMM, (int) getpgid(getpid()));
+    //char pathname[pathname_size+1];
+    //sprintf(pathname, "/%s_%d.state", DSU_COMM, (int) getpgid(getpid()));
 	
-	shm_unlink(pathname);
+	//shm_unlink(pathname);
 	
-	int shfd = shm_open(pathname, O_CREAT | O_RDWR | O_TRUNC, O_RDWR);
-	if (shfd == -1) {
-		perror("DSU \"Error creating shared memory\"");
-		exit(EXIT_FAILURE);
-	}
+	//int shfd = shm_open(pathname, O_CREAT | O_RDWR | O_TRUNC, O_RDWR);
+	//if (shfd == -1) {
+	//	perror("DSU \"Error creating shared memory\"");
+	//	exit(EXIT_FAILURE);
+	//}
 
-  	if (ftruncate(shfd, sizeof(int)) == -1) {
-	 	perror("DSU \"Error creating shared memory\"");
-		exit(EXIT_FAILURE);
-	}
+  	//if (ftruncate(shfd, sizeof(int)) == -1) {
+	// 	perror("DSU \"Error truncating shared memory\"");
+	//	exit(EXIT_FAILURE);
+	//}
 
-	dsu_program_state.workers = (int *) mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
-	if (dsu_program_state.workers == (void *) -1) {
-		perror("DSU \"Error creating shared memory\"");
-		exit(EXIT_FAILURE);
-	}
+	//dsu_program_state.workers = (int *) mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
+	//if (dsu_program_state.workers == (void *) -1) {
+	//	perror("DSU \"Error mmap\"");
+	//	exit(EXIT_FAILURE);
+	//}
 
-	dsu_program_state.workers[0] = 0;
+	//dsu_program_state.workers[0] = 0;
 
 
 	/*	Create semaphore in shared memory to avoid race conditions during modifications. */
-    int pathname_size_sem = snprintf(NULL, 0, "/%s_%d.lock", DSU_COMM, (int) getpgid(getpid()));
-    char pathname_sem[pathname_size_sem+1];
-    sprintf(pathname_sem, "/%s_%d.lock", DSU_COMM, (int) getpgid(getpid()));
+    //int pathname_size_sem = snprintf(NULL, 0, "/%s_%d.lock", DSU_COMM, (int) getpgid(getpid()));
+    //char pathname_sem[pathname_size_sem+1];
+    //sprintf(pathname_sem, "/%s_%d.lock", DSU_COMM, (int) getpgid(getpid()));
 	
-	sem_unlink(pathname_sem); // Semaphore does not terminate after exit.
+	//sem_unlink(pathname_sem); // Semaphore does not terminate after exit.
     
-	dsu_program_state.lock = sem_open(pathname_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+	//dsu_program_state.lock = sem_open(pathname_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
     
-	sem_init(dsu_program_state.lock, PTHREAD_PROCESS_SHARED, 1);
+	//sem_init(dsu_program_state.lock, PTHREAD_PROCESS_SHARED, 1);
 	
 	
 	/*  Wrappers around system function. RTLD_NEXT will find the next occurrence of a function in the search 
@@ -415,12 +413,12 @@ static __attribute__((constructor)) void dsu_init() {
 
 	/* 	Set default function for event-handler wrapper functions. */
 	dsu_select = dlsym(RTLD_NEXT, "select");
-	dsu_poll = dlsym(RTLD_NEXT, "poll");
-	dsu_ppoll = dlsym(RTLD_NEXT, "ppoll");
-	dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
-	dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
-	dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
-	dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
+	//dsu_poll = dlsym(RTLD_NEXT, "poll");
+	//dsu_ppoll = dlsym(RTLD_NEXT, "ppoll");
+	//dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
+	//dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
+	//dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
+	//dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
 
     return;
 }
@@ -600,6 +598,7 @@ ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags) {
 
 int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     DSU_DEBUG_PRINT("Bind() (%d-%d)\n", (int) getpid(), (int) gettid());
+
     /*  Bind is used to accept a client connection on an socket, this means it is a "public" socket 
         that is ready to accept requests. */
     
@@ -620,6 +619,7 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         TO DO. */
     struct sockaddr_in *addr_t; addr_t = (struct sockaddr_in *) addr;
     dsu_socketfd->port = ntohs(addr_t->sin_port);
+	DSU_DEBUG_PRINT(" - Bind port %d on %d (%d-%d)\n", dsu_socketfd->port, sockfd, (int) getpid(), (int) gettid());
     
     
     /*  Possibly communicate the socket from the older version. A bind can only be performed once on the same
@@ -631,42 +631,50 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     sprintf(dsu_socketfd->comfd_addr.sun_path, "X%s_%d.unix", DSU_COMM, dsu_socketfd->port);    // On Linux, sun_path is 108 bytes in size.
     dsu_socketfd->comfd_addr.sun_path[0] = '\0';                                                // Abstract linux socket.
     dsu_socketfd->comfd = dsu_socket(AF_UNIX, SOCK_STREAM, 0);
-    DSU_DEBUG_PRINT(" - Bind port %d on %d (%d-%d)\n", dsu_socketfd->port, sockfd, (int) getpid(), (int) gettid());
+    
+
+	
+	/*  When this socket is readable, the new version took over control. */
+    bzero(&dsu_socketfd->readyfd_addr, sizeof(dsu_socketfd->comfd_addr));
+    dsu_socketfd->readyfd_addr.sun_family = AF_UNIX;
+    sprintf(dsu_socketfd->readyfd_addr.sun_path, "X%s_%d.unix", DSU_READY, dsu_socketfd->port);    // On Linux, sun_path is 108 bytes in size.
+    dsu_socketfd->readyfd_addr.sun_path[0] = '\0';                                                 // Abstract linux socket.
+    dsu_socketfd->readyfd = dsu_socket(AF_UNIX, SOCK_DGRAM, 0);
     
     
     /*  To communicate the status between the process, shared memory is used. */
-    int pathname_size = snprintf(NULL, 0, "/%s_%d", DSU_COMM, dsu_socketfd->port);
-    char pathname[pathname_size+1];
-    sprintf(pathname, "/%s_%d", DSU_COMM, dsu_socketfd->port);
+    //int pathname_size = snprintf(NULL, 0, "/%s_%d", DSU_COMM, dsu_socketfd->port);
+    //char pathname[pathname_size+1];
+    //sprintf(pathname, "/%s_%d", DSU_COMM, dsu_socketfd->port);
 	
-	int shfd = shm_open(pathname, O_CREAT | O_RDWR , O_RDWR);
-	if (shfd == -1) {
-		perror("DSU \"Error creating shared memory\"");
-		exit(EXIT_FAILURE);
-	}
+	//int shfd = shm_open(pathname, O_CREAT | O_RDWR , O_RDWR);
+	//if (shfd == -1) {
+	//	perror("DSU \"Error creating shared memory\"");
+	//	exit(EXIT_FAILURE);
+	//}
 
-  	if (ftruncate(shfd, 3*sizeof(int)) == -1) {
-	 	perror("DSU \"Error creating shared memory\"");
-		exit(EXIT_FAILURE);
-	}
+  	//if (ftruncate(shfd, 3*sizeof(int)) == -1) {
+	//	perror("DSU \"Error creating shared memory\"");
+	//	exit(EXIT_FAILURE);
+	//}
 	
-	dsu_socketfd->status = (int *) mmap(NULL, 3*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
-	if (dsu_socketfd->status == (void *) -1) {
-		perror("DSU \"Error creating shared memory\"");
-		exit(EXIT_FAILURE);
-	}
+	//dsu_socketfd->status = (int *) mmap(NULL, 3*sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, shfd, 0);
+	//if (dsu_socketfd->status == (void *) -1) {
+	//	perror("DSU \"Error creating shared memory\"");
+	//	exit(EXIT_FAILURE);
+	//}
 
 	
 	/*  During the transition a lock is needed when the accepting file descriptor is blocking. */
-    int pathname_size_status_sem = snprintf(NULL, 0, "/%s_%d_status.semaphore", DSU_COMM, dsu_socketfd->port);
-    char pathname_status_sem[pathname_size_status_sem+1];
-    sprintf(pathname_status_sem, "%s_%d", DSU_COMM, dsu_socketfd->port);
+    //int pathname_size_status_sem = snprintf(NULL, 0, "/%s_%d_status.semaphore", DSU_COMM, dsu_socketfd->port);
+    //char pathname_status_sem[pathname_size_status_sem+1];
+    //sprintf(pathname_status_sem, "%s_%d", DSU_COMM, dsu_socketfd->port);
 
 
 	/*  During the transition a lock is needed. */
-    int pathname_size_fd_sem = snprintf(NULL, 0, "/%s_%d_key.semaphore", DSU_COMM, dsu_socketfd->port);
-    char pathname_fd_sem[pathname_size_fd_sem+1];
-    sprintf(pathname_fd_sem, "%s_%d", DSU_COMM, dsu_socketfd->port);
+    //int pathname_size_fd_sem = snprintf(NULL, 0, "/%s_%d_key.semaphore", DSU_COMM, dsu_socketfd->port);
+    //char pathname_fd_sem[pathname_size_fd_sem+1];
+    //sprintf(pathname_fd_sem, "%s_%d", DSU_COMM, dsu_socketfd->port);
 
     
     /*  Bind socket, if it fails and already exists we know that another DSU application is 
@@ -676,26 +684,25 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
         if ( errno == EADDRINUSE ) {
 
             if (dsu_inherit_fd(dsu_socketfd) > 0) {
-                
-				dsu_socketfd->monitoring = 1; // Communication file descriptor is inherited.
+				//dsu_socketfd->monitoring = 1; // Communication file descriptor is inherited.
 				
-				dsu_socketfd->status_sem = sem_open(pathname_status_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-				dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+				//dsu_socketfd->status_sem = sem_open(pathname_status_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+				//dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, O_CREAT, S_IRWXO | S_IRWXG | S_IRWXU, 1);
 				
-				DSU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
-				if (sem_wait(dsu_socketfd->status_sem) == 0) {
+				//DSU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
+				//if (sem_wait(dsu_socketfd->status_sem) == 0) {
 					
-					dsu_socketfd->version = dsu_socketfd->status[DSU_VERSION];
+					//dsu_socketfd->version = dsu_socketfd->status[DSU_VERSION];
 					
 					/* 	Could be a delayed process. */
-					if(dsu_socketfd->status[DSU_PGID] != getpgid(getpid())) 
-						++dsu_socketfd->version;
-					DSU_DEBUG_PRINT(" - version %d (%d-%d)\n", dsu_socketfd->version, (int) getpid(), (int) gettid());
+					//if(dsu_socketfd->status[DSU_PGID] != getpgid(getpid())) 
+					//	++dsu_socketfd->version;
+					//DSU_DEBUG_PRINT(" - version %d (%d-%d)\n", dsu_socketfd->version, (int) getpid(), (int) gettid());
 					
-					DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
-					sem_post(dsu_socketfd->status_sem);
+					//DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
+					//sem_post(dsu_socketfd->status_sem);
 				
-				}
+				//}
 				
                 dsu_sockets_transfer_fd(&dsu_program_state.binds, &dsu_program_state.sockets, dsu_socketfd);
                 				
@@ -706,30 +713,29 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     
 	/*	No other version running. */
 		 	
-	sem_unlink(pathname_status_sem); // Semaphore does not terminate after exit.
-    dsu_socketfd->status_sem = sem_open(pathname_status_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-    sem_init(dsu_socketfd->status_sem, PTHREAD_PROCESS_SHARED, 1);
+	//sem_unlink(pathname_status_sem); // Semaphore does not terminate after exit.
+    //dsu_socketfd->status_sem = sem_open(pathname_status_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+    //sem_init(dsu_socketfd->status_sem, PTHREAD_PROCESS_SHARED, 1);
 
 	
-	sem_unlink(pathname_fd_sem); // Semaphore does not terminate after exit.
-    dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
-    sem_init(dsu_socketfd->fd_sem, PTHREAD_PROCESS_SHARED, 1);
+	//sem_unlink(pathname_fd_sem); // Semaphore does not terminate after exit.
+    //dsu_socketfd->fd_sem = sem_open(pathname_fd_sem, O_CREAT | O_EXCL, S_IRWXO | S_IRWXG | S_IRWXU, 1);
+    //sem_init(dsu_socketfd->fd_sem, PTHREAD_PROCESS_SHARED, 1);
 
 
-	dsu_socketfd->monitoring = 1;
+	//dsu_socketfd->monitoring = 1;
 	
 
-	DSU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
-	if (sem_wait(dsu_socketfd->status_sem) == 0) {
+	//SU_DEBUG_PRINT(" < Lock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
+	//if (sem_wait(dsu_socketfd->status_sem) == 0) {
 		
-		dsu_socketfd->status[DSU_PGID] = getpgid(getpid());
-		dsu_socketfd->version = dsu_socketfd->status[DSU_VERSION] = 0;
-		dsu_socketfd->status[DSU_TRANSFER] = 0;
-		dsu_socketfd->transfer = 0;	
+	//	dsu_socketfd->status[DSU_PGID] = getpgid(getpid());
+	//	dsu_socketfd->version = dsu_socketfd->status[DSU_VERSION] = 0;
+	//	dsu_socketfd->status[DSU_TRANSFER] = 0;
+	//	dsu_socketfd->transfer = 0;	
 		
-		DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
-		sem_post(dsu_socketfd->status_sem);
-	}
+	//	DSU_DEBUG_PRINT(" > Unlock status %d (%d-%d)\n", dsu_socketfd->port, (int) getpid(), (int) gettid());
+	//	sem_post(dsu_socketfd->status_sem);
 	
 	
     dsu_sockets_transfer_fd(&dsu_program_state.binds, &dsu_program_state.sockets, dsu_socketfd);
@@ -828,6 +834,8 @@ int close(int sockfd) {
 	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
 	if (dsu_socketfd != NULL) {
 		DSU_DEBUG_PRINT(" - Binded socket %d=%d (%d-%d)\n",dsu_socketfd->fd, dsu_socketfd->shadowfd, (int) getpid(), (int) gettid());
+		if (dsu_socketfd->readyfd > 0) dsu_close(dsu_socketfd->readyfd);
+		if (dsu_socketfd->comfd >0) dsu_close(dsu_socketfd->comfd);
 		dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
 		return dsu_close(sockfd);
 	}
@@ -836,7 +844,7 @@ int close(int sockfd) {
 	dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_MONITOR_FD);
 	if (dsu_socketfd != NULL) {
 		DSU_DEBUG_PRINT(" - Internal master socket (%d-%d)\n", (int) getpid(), (int) gettid());
-		dsu_socketfd->monitoring = 0;
+		//dsu_socketfd->monitoring = 0;
 		return dsu_close(sockfd);
 	}
 

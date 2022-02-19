@@ -134,10 +134,14 @@ wrk/wrk: wrk
 wrk.o: wrk/wrk
 	cp wrk/wrk wrk.o
 
+clean_lighttpd:
+	rm -rf lighttpd1.4
+	rm -f lighttpd.o
+	rm -f config/lighttpd.conf
 
-clean:
-	rm -rf lighttpd1.4 nginx apache etc wrk
-	rm -f nginx.o lighttpd.o apache.o httpd wrk.o
-	rm -f config/nginx.conf config/apache.conf config/lighttpd.conf
+clean: clean_lighttpd
+	rm -rf nginx apache etc wrk
+	rm -f nginx.o apache.o httpd wrk.o
+	rm -f config/nginx.conf config/apache.conf 
 	rm -f loss_of_service_updates.plt loss_of_service.plt comparison.txt
 

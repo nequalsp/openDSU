@@ -10,7 +10,7 @@ CC?=gcc
 
 
 DEBUG= -D DEBUG="\"$(log_dir)\""	
-
+#DEBUG=
 
 SRCS:=$(wildcard *.c)
 T1OBJS:=$(patsubst %.c,%.o,$(SRCS))
