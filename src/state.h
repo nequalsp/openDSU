@@ -48,10 +48,12 @@ struct dsu_socket_list {
     struct sockaddr_un comfd_addr;
 	struct dsu_fd_list *comfds;		// File descriptors of acccepted internal connections.
     int comfd;						// File descriptor for listening for internal connections.
+	int comfd_close;
 	
-	
-	struct sockaddr_un readyfd_addr;
+
 	int readyfd;					// File descriptor for listening for ready signal.
+	int markreadyfd;				// File descriptor for sending ready signal.
+    int ready;
 	
 
     /*  Status. */
@@ -86,7 +88,11 @@ struct dsu_state_struct {
     struct dsu_socket_list *sockets;
 	struct dsu_socket_list *binds;
     
-	
+    
+    int processes;
+	struct flock *write_lock;
+    struct flock *unlock;
+    
 	/* Termination information. */
 	//int live;
 	//int *workers;

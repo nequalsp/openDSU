@@ -2,7 +2,7 @@
 #define DSU_UTILS
 
 
-int fcntl(int fd, int cmd, char *argp);
+//int fcntl(int fd, int cmd, char *argp);
 extern int (*dsu_fcntl)(int, int, char *);
 
 

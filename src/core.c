@@ -21,13 +21,14 @@
 #include <dlfcn.h>
 #include <sys/mman.h>
 #include <stdarg.h>
+#include <fcntl.h>
 #include <poll.h>
 
 #include "core.h"
 #include "state.h"
 #include "communication.h"
 #include "utils.h"
-#include "file.h"
+//#include "file.h"
 
 #include "event_handlers/select.h"
 //#include "event_handlers/poll.h"
@@ -90,9 +91,8 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 			dsu_read_fd(dsu_sockfd->comfd, &_comfd, &port);
 			DSU_DEBUG_PRINT("  - Received %d & %d (%d-%d)\n", dsu_sockfd->shadowfd, _comfd, (int) getpid(), (int) gettid());
 
-	
-			DSU_DEBUG_PRINT("  - Close %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-			dsu_close(dsu_sockfd->comfd);
+
+			dsu_sockfd->comfd_close = dsu_sockfd->comfd;
 			dsu_sockfd->comfd = _comfd;
 
 
@@ -181,25 +181,29 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 //}
 
 
-//void dsu_activate_process(void) {
+int dsu_activate_process(void) {
 		
-//	DSU_DEBUG_PRINT(" < Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-//	if( sem_wait(dsu_program_state.lock) == 0) {
-		
-//		++dsu_program_state.workers[0];
-
-//		DSU_DEBUG_PRINT(" > Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-//		sem_post(dsu_program_state.lock);
-//	}
+	DSU_DEBUG_PRINT(" < Lock process file (%d-%d)\n", (int) getpid(), (int) gettid());
+    fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.write_lock);
+    
+    char buf[2] = { 0 };    
+    if (dsu_read(dsu_program_state.processes, buf, 1) == -1) return -1;
+    int size = strtol(buf, NULL, 10) + 1;
+    
+    DSU_DEBUG_PRINT(" - Number of processes set to %d (%d-%d)\n", size, (int) getpid(), (int) gettid());
+    buf[0] = (char) (size + '0');
+    if (dsu_write(dsu_program_state.processes, buf, 1)) return -1;
+    
+    DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
+    fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.write_lock);
+    
+    return 0;
 	
-//}
+}
 
-
-//void dsu_configure_process(void) {
-//	dsu_forall_sockets(dsu_program_state.binds, dsu_configure_socket);
-//}
-
-
+void dsu_configure_process(void) {
+	dsu_forall_sockets(dsu_program_state.binds, dsu_configure_socket);
+}
 			
 
 int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
@@ -333,8 +337,21 @@ static __attribute__((constructor)) void dsu_init() {
 	    }
 	#endif
 	DSU_DEBUG_PRINT("INIT() (%d-%d)\n", (int) getpid(), (int) gettid());
+    
 
+    dsu_program_state.write_lock = (struct flock *) calloc(1, sizeof(struct flock));
+    dsu_program_state.write_lock->l_type = F_WRLCK;
+    dsu_program_state.write_lock->l_start = 0; 
+    dsu_program_state.write_lock->l_whence = SEEK_SET; 
+    dsu_program_state.write_lock->l_len = 0; 
 
+    dsu_program_state.unlock = (struct flock *) calloc(1, sizeof(struct flock));
+    dsu_program_state.unlock->l_type = F_UNLCK;
+    dsu_program_state.unlock->l_start = 0; 
+    dsu_program_state.unlock->l_whence = SEEK_SET; 
+    dsu_program_state.unlock->l_len = 0; 
+    
+    
     dsu_program_state.sockets = NULL;
     dsu_program_state.binds = NULL;
 
@@ -420,6 +437,29 @@ static __attribute__((constructor)) void dsu_init() {
 	//dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
 	//dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
 
+
+    printf("test\n");
+    
+    int len = snprintf(NULL, 0, "/tmp/dsu_processes_%d.pid", (int) getpid());
+	char temp_path[len+1];
+	sprintf(temp_path, "/tmp/dsu_processes_%d.pid", (int) getpid());
+    printf("test %d %s\n", len, temp_path);
+    dsu_program_state.processes = open(temp_path, O_RDWR | O_CREAT, 0600);
+    if (dsu_program_state.processes <= 0) {
+        perror("DSU \"Error opening process file\"");
+		exit(EXIT_FAILURE);
+    }
+    unlink(temp_path);
+    printf("test\n");
+    char buf = 0 + '0';
+    printf("buf: %c fd:%d\n", buf, dsu_program_state.processes);
+    if (dsu_write(dsu_program_state.processes, &buf, 1) == -1) {
+        perror("DSU \"Error initiating process file\"");
+		exit(EXIT_FAILURE);
+    }
+
+     printf("test >>\n");
+    
     return;
 }
 
@@ -632,14 +672,19 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
     dsu_socketfd->comfd_addr.sun_path[0] = '\0';                                                // Abstract linux socket.
     dsu_socketfd->comfd = dsu_socket(AF_UNIX, SOCK_STREAM, 0);
     
-
 	
 	/*  When this socket is readable, the new version took over control. */
-    bzero(&dsu_socketfd->readyfd_addr, sizeof(dsu_socketfd->comfd_addr));
-    dsu_socketfd->readyfd_addr.sun_family = AF_UNIX;
-    sprintf(dsu_socketfd->readyfd_addr.sun_path, "X%s_%d.unix", DSU_READY, dsu_socketfd->port);    // On Linux, sun_path is 108 bytes in size.
-    dsu_socketfd->readyfd_addr.sun_path[0] = '\0';                                                 // Abstract linux socket.
-    dsu_socketfd->readyfd = dsu_socket(AF_UNIX, SOCK_DGRAM, 0);
+    //bzero(&dsu_socketfd->readyfd_addr, sizeof(dsu_socketfd->comfd_addr));
+    //dsu_socketfd->readyfd_addr.sun_family = AF_UNIX;
+    //sprintf(dsu_socketfd->readyfd_addr.sun_path, "X%s_%d.unix", DSU_READY, dsu_socketfd->port);    // On Linux, sun_path is 108 bytes in size.
+    //dsu_socketfd->readyfd_addr.sun_path[0] = '\0';                                                 // Abstract linux socket.
+	int pair[2];
+	if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0, pair) < 0) {
+		perror("DSU \"Error generating socket pair\"");
+		exit(EXIT_FAILURE);
+	}   
+	dsu_socketfd->readyfd = pair[0];
+	dsu_socketfd->markreadyfd = pair[1];
     
     
     /*  To communicate the status between the process, shared memory is used. */

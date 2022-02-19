@@ -8,9 +8,18 @@ void dsu_socket_list_init(struct dsu_socket_list *dsu_socket) {
     dsu_socket->fd      	= -1;
 	dsu_socket->fds      	= NULL;
     dsu_socket->shadowfd    = -1;
+    
+
     dsu_socket->comfd       = -1;
+	dsu_socket->comfd_close = -1;
     dsu_socket->comfds      = NULL;
+	
+
+    dsu_socket->readyfd		= -1;
 	dsu_socket->readyfd		= -1;
+    dsu_socket->ready		= 0;
+    
+    
 	//dsu_socket->status      = NULL;
 	//dsu_socket->monitoring	= 0;
 	//dsu_socket->status_sem	= 0;

@@ -16,6 +16,8 @@
 int (*dsu_select)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 int correction = 0;
 int max_fds = 0;
+int dsu_live = 0;
+
 //int transfer = 0;
 
 void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
@@ -26,12 +28,18 @@ void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	/*	HACK if readfds is NULL TO DO set in program state so that malloc can be called and it will be removed. */
 	if (readfds == NULL) return;
 	
+	
 	//if (dsu_sockfd->monitoring) {
 		DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-		
 		FD_SET(dsu_sockfd->comfd, readfds);
-		FD_SET(dsu_sockfd->readyfd, readfds);
-		if (max_fds < dsu_sockfd->comfd + 2) max_fds = dsu_sockfd->comfd + 2;
+        if (max_fds < dsu_sockfd->comfd + 1) max_fds = dsu_sockfd->comfd + 1;
+		
+        if (!dsu_sockfd->ready) {
+            DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", dsu_sockfd->readyfd, (int) getpid(), (int) gettid());
+		    FD_SET(dsu_sockfd->readyfd, readfds);
+            if (max_fds < dsu_sockfd->readyfd + 1) max_fds = dsu_sockfd->readyfd + 1;
+        }
+		
 	//}
 	
     
@@ -75,9 +83,9 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 		
 		DSU_DEBUG_PRINT(" - remove: %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
 		FD_CLR(dsu_sockfd->comfd, readfds);
-	}
-	
+	} 
 
+	
     struct dsu_fd_list *comfds =   dsu_sockfd->comfds;   
    	
     while (comfds != NULL) {
@@ -102,14 +110,24 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
             /*  Connection is closed by client. */
             if (r == 0) {
                 
-                DSU_DEBUG_PRINT(" - Close on %d (%d-%d)\n", comfds->fd, (int) getpid(), (int) gettid());
-                                 
+
+                DSU_DEBUG_PRINT(" - Close on %d (%d-%d)\n", comfds->fd, (int) getpid(), (int) gettid());                          
                 dsu_close(comfds->fd);
                 FD_CLR(comfds->fd, readfds);
+
                 
                 struct dsu_fd_list *_comfds = comfds;
                 comfds = comfds->next;
                 dsu_socket_remove_fds(dsu_sockfd, _comfds->fd, DSU_INTERNAL_FD);
+
+			
+				/* Mark file descriptor as transferred. */
+				DSU_DEBUG_PRINT(" - port %d is ready in the new version\n", dsu_sockfd->port);
+				const char *buf = "ready";
+				if (dsu_send(dsu_sockfd->markreadyfd, &buf, 5, MSG_CONFIRM) < 0) {
+					DSU_DEBUG_PRINT(" - send to readyfd %d failed\n", dsu_sockfd->readyfd);
+				}
+				
                 
                 continue;
             } 
@@ -158,6 +176,15 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	
     if (readfds != NULL && FD_ISSET(dsu_sockfd->fd, readfds)) {
 
+		
+		// Mark ready to be listening.
+		if (dsu_sockfd->comfd_close > 0) {
+			DSU_DEBUG_PRINT(" - port %d is ready in on the side of the new version\n", dsu_sockfd->port);
+			dsu_close(dsu_sockfd->comfd_close);
+			dsu_sockfd->comfd_close = -1;
+		}
+
+		
 		/*  Deactivate original file descriptor. */
 		FD_CLR(dsu_sockfd->fd, readfds);
 
@@ -218,12 +245,25 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     //    sem_post(dsu_sockfd->fd_sem);
     //    dsu_sockfd->locked = DSU_UNLOCKED;
     //}
+    if (FD_ISSET(dsu_sockfd->readyfd, readfds)) {
+        dsu_sockfd->ready = 1;
+    }
+
 	
-    if (readfds != NULL && FD_ISSET(dsu_sockfd->shadowfd, readfds) ) { // && !FD_ISSET(dsu_sockfd->readyfd, readfds) ) {
+    if (readfds != NULL && FD_ISSET(dsu_sockfd->shadowfd, readfds)) {
 		DSU_DEBUG_PRINT(" - Reset %d => %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->fd, (int) getpid(), (int) gettid());
         FD_CLR(dsu_sockfd->shadowfd, readfds);
-        FD_SET(dsu_sockfd->fd, readfds);
+		if (!dsu_sockfd->ready) {
+        	FD_SET(dsu_sockfd->fd, readfds);
+        }
     }
+	
+
+	if (readfds != NULL && FD_ISSET(dsu_sockfd->readyfd, readfds)) {
+		++correction;
+		FD_CLR(dsu_sockfd->readyfd, readfds);
+	}
+	
         
 }
 
@@ -259,10 +299,9 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	
 
 	/* 	On first call to select, mark worker active and configure binded sockets. */
-	//if (!dsu_program_state.live) {	
-		
-	//	dsu_activate_process();
-	//	dsu_configure_process();
+	if (!dsu_live) {	
+		if (dsu_activate_process() > 0) dsu_live = 1;
+    }
 		
 		/*	Process is initialized. */
 	//	dsu_program_state.live = 1;
