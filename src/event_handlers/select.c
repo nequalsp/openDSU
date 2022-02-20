@@ -155,8 +155,8 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
             
             } else {
            
-                DSU_DEBUG_PRINT(" - Send file descriptors %d & %d on %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->comfd, comfds->fd, (int) getpid(), (int) gettid());
-                dsu_write_fd(comfds->fd, dsu_sockfd->shadowfd, port); // handle return value;
+                DSU_DEBUG_PRINT(" - Send file descriptors %d & %d on %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->comfd, comfds->fd, (int) getpid(), (int) gettid());
+                dsu_write_fd(comfds->fd, dsu_sockfd->fd, port); // handle return value;
 			    dsu_write_fd(comfds->fd, dsu_sockfd->comfd, port);
 
             }
@@ -192,13 +192,13 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 
 		
 		/*  Deactivate original file descriptor. */
-		FD_CLR(dsu_sockfd->fd, readfds);
+		//FD_CLR(dsu_sockfd->fd, readfds);
 
 		
 		/*  Set shadow file descriptor. */
-		DSU_DEBUG_PRINT(" - Set %d => %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
-		FD_SET(dsu_sockfd->shadowfd, readfds);
-		if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
+		//DSU_DEBUG_PRINT(" - Set %d => %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
+		//FD_SET(dsu_sockfd->shadowfd, readfds);
+		//if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
 
 
     }
@@ -214,12 +214,12 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     }
 
 	
-    if (readfds != NULL && FD_ISSET(dsu_sockfd->shadowfd, readfds)) {
-		DSU_DEBUG_PRINT(" - Reset %d => %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->fd, (int) getpid(), (int) gettid());
-        FD_CLR(dsu_sockfd->shadowfd, readfds);
-		if (!dsu_sockfd->ready) {
-        	FD_SET(dsu_sockfd->fd, readfds);
-        } else {
+    if (readfds != NULL && FD_ISSET(dsu_sockfd->fd, readfds)) {
+		//DSU_DEBUG_PRINT(" - remove  %d => %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->fd, (int) getpid(), (int) gettid());
+        //FD_CLR(dsu_sockfd->shadowfd, readfds);
+		if (dsu_sockfd->ready) {
+			DSU_DEBUG_PRINT(" - remove public  %d (%d-%d)\n", dsu_sockfd->fd, (int) getpid(), (int) gettid());
+			FD_CLR(dsu_sockfd->fd, readfds);
 			++correction;
 		}
     }

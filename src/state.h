@@ -33,7 +33,6 @@ struct dsu_socket_list {
     
 	
 	int fd;
-	int shadowfd;
     int port;
 	
 	
@@ -106,7 +105,7 @@ struct dsu_socket_list *dsu_sockets_transfer_fd(struct dsu_socket_list **dest, s
 struct dsu_socket_list *dsu_sockets_search_fd(struct dsu_socket_list *head, int fd);
 
 /* 	Search for shadow datastructure based on file descriptor. */
-struct dsu_socket_list *dsu_sockets_search_shadowfd(struct dsu_socket_list *head, int shadowfd);
+//struct dsu_socket_list *dsu_sockets_search_shadowfd(struct dsu_socket_list *head, int shadowfd);
 
 /*	Search for shadow datastructure based on port. */
 struct dsu_socket_list *dsu_sockets_search_port(struct dsu_socket_list *head, int port);
@@ -121,10 +120,10 @@ void dsu_socket_remove_fds(struct dsu_socket_list *node, int comfd, int flag);
 struct dsu_socket_list *dsu_sockets_search_fds(struct dsu_socket_list *node, int sockfd, int flag);
 
 /*	Switch user level file descriptor to shadow file descriptor (possible inhirited). */
-int dsu_shadowfd(int fd);
+//int dsu_shadowfd(int fd);
 
 /*	Switch shadow file descriptor back to user level file descriptor. */
-int dsu_originalfd(int shadowfd);
+//int dsu_originalfd(int shadowfd);
 
 /* 	Check if the file descriptor is an internal connection. */
 int dsu_is_internal_conn(int fd);

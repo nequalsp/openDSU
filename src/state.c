@@ -7,7 +7,7 @@ void dsu_socket_list_init(struct dsu_socket_list *dsu_socket) {
 	dsu_socket->port        = 0;
     dsu_socket->fd      	= -1;
 	dsu_socket->fds      	= NULL;
-    dsu_socket->shadowfd    = -1;
+    //dsu_socket->shadowfd    = -1;
     
 
     dsu_socket->comfd       = -1;
@@ -81,15 +81,15 @@ struct dsu_socket_list *dsu_sockets_search_fd(struct dsu_socket_list *head, int 
 }
 
 
-struct dsu_socket_list *dsu_sockets_search_shadowfd(struct dsu_socket_list *head, int sockfd) {
+//struct dsu_socket_list *dsu_sockets_search_shadowfd(struct dsu_socket_list *head, int sockfd) {
     
-    while (head != NULL) {
-        if (head->shadowfd == sockfd) return head;
-        head = head->next;
-    }
+//    while (head != NULL) {
+//        if (head->shadowfd == sockfd) return head;
+//        head = head->next;
+//    }
     
-    return NULL;
-}
+//    return NULL;
+//}
 
 
 struct dsu_socket_list *dsu_sockets_search_port(struct dsu_socket_list *head, int port) {
@@ -197,28 +197,28 @@ struct dsu_socket_list *dsu_sockets_search_fds(struct dsu_socket_list *node, int
 }
 
 
-int dsu_shadowfd(int fd) {
+//int dsu_shadowfd(int fd) {
     /*  If sockfd is in the list of binded sockets, return the shadowfd. If not in the list, it is not a
         socket that is binded to a port. */
     
-    struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, fd);
-    if (dsu_sockfd != NULL)
-        return dsu_sockfd->shadowfd;
+//    struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, fd);
+//    if (dsu_sockfd != NULL)
+//       return dsu_sockfd->shadowfd;
     
-    return fd;
-}
+//    return fd;
+//}
 
 
-int dsu_originalfd(int shadowfd) {
+//int dsu_originalfd(int shadowfd) {
     /*  If sockfd is in the list of binded sockets, return the shadowfd. If not in the list, it is not a
         socket that is binded to a port. */
     
-    struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_shadowfd(dsu_program_state.binds, shadowfd);
-    if (dsu_sockfd != NULL)
-        return dsu_sockfd->fd;
+//    struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_shadowfd(dsu_program_state.binds, shadowfd);
+//    if (dsu_sockfd != NULL)
+//        return dsu_sockfd->fd;
     
-    return shadowfd;
-}
+//    return shadowfd;
+//}
 
 
 int dsu_is_internal_conn(int fd) {

@@ -83,15 +83,24 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 
 
             DSU_DEBUG_PRINT("  - Receive on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-            int port = 0; int _comfd = 0;
-            dsu_read_fd(dsu_sockfd->comfd, &dsu_sockfd->shadowfd, &port);	// Handle return value;
+            int port = 0; int _comfd = 0; int _sockfd;
+            dsu_read_fd(dsu_sockfd->comfd, &_sockfd, &port);	// Handle return value;
 			dsu_read_fd(dsu_sockfd->comfd, &_comfd, &port);
-			DSU_DEBUG_PRINT("  - Received %d & %d (%d-%d)\n", dsu_sockfd->shadowfd, _comfd, (int) getpid(), (int) gettid());
+			DSU_DEBUG_PRINT("  - Received %d & %d (%d-%d)\n", _sockfd, _comfd, (int) getpid(), (int) gettid());
 
+			if (port > 0) {
+				
+				/* Connect socket to the same v-node. */
+				if (dup2(_sockfd, dsu_sockfd->fd) == -1) {
+					return -1;
+				}
 
-			dsu_sockfd->comfd_close = dsu_sockfd->comfd;
-			dsu_sockfd->comfd = _comfd;
-
+				
+				/* preserve comfd socket to signal ready. */
+				dsu_sockfd->comfd_close = dsu_sockfd->comfd;
+				dsu_sockfd->comfd = _comfd;
+				
+			}
 
 			return port;
 		}
@@ -357,7 +366,7 @@ int socket(int domain, int type, int protocol) {
         /* After successfull creation, add socket to the DSU state. */
         struct dsu_socket_list dsu_socket;
         dsu_socket_list_init(&dsu_socket);
-        dsu_socket.shadowfd = dsu_socket.fd = sockfd;
+        dsu_socket.fd = sockfd;
         dsu_sockets_add(&dsu_program_state.sockets, &dsu_socket);
     }
 	
@@ -367,78 +376,78 @@ int socket(int domain, int type, int protocol) {
 }
 
 
-int dup(int oldfd) {
-	DSU_DEBUG_PRINT("Dup() (%d-%d)\n", (int) getpid(), (int) gettid());
-	return dsu_dup(dsu_shadowfd(oldfd));
-}
+//int dup(int oldfd) {
+//	DSU_DEBUG_PRINT("Dup() (%d-%d)\n", (int) getpid(), (int) gettid());
+//	return dsu_dup(dsu_shadowfd(oldfd));
+//}
 
 
-int dup2(int oldfd, int newfd) {
-	DSU_DEBUG_PRINT("Dup2() (%d-%d)\n", (int) getpid(), (int) gettid());
-	return dsu_dup2(dsu_shadowfd(oldfd), dsu_shadowfd(newfd));
-}
+//int dup2(int oldfd, int newfd) {
+//	DSU_DEBUG_PRINT("Dup2() (%d-%d)\n", (int) getpid(), (int) gettid());
+//	return dsu_dup2(dsu_shadowfd(oldfd), dsu_shadowfd(newfd));
+//}
 
 
-int dup3(int oldfd, int newfd, int flags) {
-	DSU_DEBUG_PRINT("Dup3() (%d-%d)\n", (int) getpid(), (int) gettid());
-	int fd = dsu_dup3(dsu_shadowfd(oldfd), dsu_shadowfd(newfd), flags);
-	DSU_DEBUG_PRINT(" - %d = %d (%d-%d)\n", fd, oldfd, (int) getpid(), (int) gettid());
-	return fd;
-}
+//int dup3(int oldfd, int newfd, int flags) {
+//	DSU_DEBUG_PRINT("Dup3() (%d-%d)\n", (int) getpid(), (int) gettid());
+//	int fd = dsu_dup3(dsu_shadowfd(oldfd), dsu_shadowfd(newfd), flags);
+//	DSU_DEBUG_PRINT(" - %d = %d (%d-%d)\n", fd, oldfd, (int) getpid(), (int) gettid());
+//	return fd;
+//}
 
 
-int creat(const char *pathname, mode_t mode) {
-	DSU_DEBUG_PRINT("creat() %s (%d-%d)\n", pathname, (int) getpid(), (int) gettid());
-	return dsu_creat(pathname, mode);
-}
+//int creat(const char *pathname, mode_t mode) {
+//	DSU_DEBUG_PRINT("creat() %s (%d-%d)\n", pathname, (int) getpid(), (int) gettid());
+//	return dsu_creat(pathname, mode);
+//}
 
 
-ssize_t read(int fd, void *buf, size_t count) {
-	DSU_DEBUG_PRINT("read() %d -> %d (%d-%d)\n", fd, dsu_shadowfd(fd), (int) getpid(), (int) gettid());
-	return dsu_read(dsu_shadowfd(fd), buf, count);
-}
+//ssize_t read(int fd, void *buf, size_t count) {
+//	DSU_DEBUG_PRINT("read() %d -> %d (%d-%d)\n", fd, dsu_shadowfd(fd), (int) getpid(), (int) gettid());
+//	return dsu_read(dsu_shadowfd(fd), buf, count);
+//}
 
 
-ssize_t recv(int sockfd, void *buf, size_t len, int flags) {
-	DSU_DEBUG_PRINT("recv() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-	return dsu_recv(dsu_shadowfd(sockfd), buf, len, flags);
-}
+//ssize_t recv(int sockfd, void *buf, size_t len, int flags) {
+//	DSU_DEBUG_PRINT("recv() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
+//	return dsu_recv(dsu_shadowfd(sockfd), buf, len, flags);
+//}
 
 
-ssize_t recvfrom(int sockfd, void *restrict buf, size_t len, int flags, struct sockaddr *restrict src_addr, socklen_t *restrict addrlen) {
-	DSU_DEBUG_PRINT("recvfrom() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-	return dsu_recvfrom(dsu_shadowfd(sockfd), buf, len, flags, src_addr, addrlen);
-}
+//ssize_t recvfrom(int sockfd, void *restrict buf, size_t len, int flags, struct sockaddr *restrict src_addr, socklen_t *restrict addrlen) {
+//	DSU_DEBUG_PRINT("recvfrom() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
+//	return dsu_recvfrom(dsu_shadowfd(sockfd), buf, len, flags, src_addr, addrlen);
+//}
 
 
-ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags) {
-	DSU_DEBUG_PRINT("recvmsg() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-	return dsu_recvmsg(dsu_shadowfd(sockfd), msg, flags);
-}
+//ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags) {
+//	DSU_DEBUG_PRINT("recvmsg() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
+//	return dsu_recvmsg(dsu_shadowfd(sockfd), msg, flags);
+//}
 
 
-ssize_t write(int fd, const void *buf, size_t count) {
-	DSU_DEBUG_PRINT("write() %d -> %d (%d-%d)\n", fd, dsu_shadowfd(fd), (int) getpid(), (int) gettid());
-	return dsu_write(dsu_shadowfd(fd), buf, count);
-}
+//ssize_t write(int fd, const void *buf, size_t count) {
+//	DSU_DEBUG_PRINT("write() %d -> %d (%d-%d)\n", fd, dsu_shadowfd(fd), (int) getpid(), (int) gettid());
+//	return dsu_write(dsu_shadowfd(fd), buf, count);
+//}
 
 
-ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
-	DSU_DEBUG_PRINT("send() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-	return dsu_send(dsu_shadowfd(sockfd), buf, len, flags);
-}
+//ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
+//	DSU_DEBUG_PRINT("send() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
+//	return dsu_send(dsu_shadowfd(sockfd), buf, len, flags);
+//}
 
 
-ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen) {
-	DSU_DEBUG_PRINT("sendto() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-	return dsu_sendto(dsu_shadowfd(sockfd), buf, len, flags, dest_addr, addrlen);
-}
+//ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen) {
+//	DSU_DEBUG_PRINT("sendto() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
+//	return dsu_sendto(dsu_shadowfd(sockfd), buf, len, flags, dest_addr, addrlen);
+//}
 
 
-ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags) {
-	DSU_DEBUG_PRINT("sendmsg() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-	return dsu_sendmsg(dsu_shadowfd(sockfd), msg, flags);
-}
+//ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags) {
+//	DSU_DEBUG_PRINT("sendmsg() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
+//	return dsu_sendmsg(dsu_shadowfd(sockfd), msg, flags);
+//}
 
 
 int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
@@ -512,15 +521,15 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 }
 
 
-int listen(int sockfd, int backlog) {
-    DSU_DEBUG_PRINT("Listen() on fd %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
+//int listen(int sockfd, int backlog) {
+//    DSU_DEBUG_PRINT("Listen() on fd %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
     /*  listen() marks the socket referred to by sockfd as a passive socket, that is, as a socket that will be
         used to accept incoming connection requests using accept(). */
     
 	/*	Second and subsequent calls to listen() have no other effect. */
-	return dsu_listen(dsu_shadowfd(sockfd), backlog);
-	
-}
+//	return dsu_listen(dsu_shadowfd(sockfd), backlog);
+//	
+//}
 
 
 int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
@@ -530,18 +539,17 @@ int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrl
         returns a new file descriptor referring to that socket. The DSU library need to convert the file descriptor to the shadow
         file descriptor. */
     
-    int shadowfd = dsu_shadowfd(sockfd);
-    
-    int sessionfd = dsu_accept(shadowfd, addr, addrlen);
+	
+    int sessionfd = dsu_accept(sockfd, addr, addrlen);
 	if (sessionfd == -1)
 		return sessionfd;
 	
+
     DSU_DEBUG_PRINT(" - accept %d (%d-%d)\n", sessionfd, (int) getpid(), (int) gettid());
-    
 	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
-	
 	if (dsu_sockfd != NULL)
 		dsu_socket_add_fds(dsu_sockfd, sessionfd, DSU_NON_INTERNAL_FD);
+	
 	
     return sessionfd;    
 }
@@ -550,28 +558,27 @@ int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrl
 int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags) {
 	DSU_DEBUG_PRINT("Accept4() (%d-%d)\n", (int) getpid(), (int) gettid());
     /*  For more information see dsu_accept(). */     
+
     
-    int shadowfd = dsu_shadowfd(sockfd);
-	
-    int sessionfd = dsu_accept4(shadowfd, addr, addrlen, flags);
+    int sessionfd = dsu_accept4(sockfd, addr, addrlen, flags);
 	if (sessionfd == -1)
 		return sessionfd;
+
     
     DSU_DEBUG_PRINT(" - accept %d (%d-%d)\n", sessionfd, (int) getpid(), (int) gettid());
-    
 	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
-	
 	if (dsu_sockfd != NULL)
 		dsu_socket_add_fds(dsu_sockfd, sessionfd, DSU_NON_INTERNAL_FD);
     
+
     return sessionfd;   
 }
 
 
-int shutdown(int sockfd, int how) {
-	DSU_DEBUG_PRINT("Shutdown() (%d-%d)\n", (int) getpid(), (int) gettid());
-	return dsu_shutdown(dsu_shadowfd(sockfd), how);
-}
+//int shutdown(int sockfd, int how) {
+//	DSU_DEBUG_PRINT("Shutdown() (%d-%d)\n", (int) getpid(), (int) gettid());
+//	return dsu_shutdown(dsu_shadowfd(sockfd), how);
+//}
 
 
 int close(int sockfd) {
@@ -600,7 +607,7 @@ int close(int sockfd) {
 
 	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
 	if (dsu_socketfd != NULL) {
-		DSU_DEBUG_PRINT(" - Binded socket %d=%d (%d-%d)\n",dsu_socketfd->fd, dsu_socketfd->shadowfd, (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT(" - Binded socket %d (%d-%d)\n",dsu_socketfd->fd, (int) getpid(), (int) gettid());
 		if (dsu_socketfd->readyfd > 0) dsu_close(dsu_socketfd->readyfd);
 		if (dsu_socketfd->comfd >0) dsu_close(dsu_socketfd->comfd);
 		dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
