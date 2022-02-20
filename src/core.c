@@ -67,6 +67,9 @@ ssize_t (*dsu_send)(int, const void *, size_t, int);
 ssize_t (*dsu_sendto)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
 ssize_t (*dsu_sendmsg)(int, const struct msghdr *, int);
 
+sighandler_t (*dsu_signal)(int signum, sighandler_t handler);
+int (*dsu_sigaction)(int signum, const struct sigaction *restrict act, struct sigaction *restrict oldact);
+
 int (*dsu_open)(const char *, int, mode_t);
 int (*dsu_creat)(const char *, mode_t);
 
@@ -105,105 +108,111 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 }
 
 
-//int dsu_termination_detection() {
+int dsu_termination_detection() {
 	/*	Determine based on the global programming state whether it is possible to terminate. A version cannot terminate if:
 		1.	One socket did not increase version.
 		2.	A socket is still actively monitored.
 		3.	The singlely linked list comdfd still contains open connections between different versions.
 		4.	The singlely linked list fds still contains open connections with clients. */
 	
-//	DSU_DEBUG_PRINT(" - Termination detection (%d-%d)\n", (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT(" - Termination detection (%d-%d)\n", (int) getpid(), (int) gettid());
 	
-//	struct dsu_socket_list *current = dsu_program_state.binds;
+	struct dsu_socket_list *current = dsu_program_state.binds;
 
-//	while (current != NULL) {
+	while (current != NULL) {
 		
+        if (	!current->ready
+			||  current->comfds != NULL
+			||	current->fds != NULL
+			 )
+			return 0;        
+
+
+
+
 		/* 	In case of error do not terminate. */
-//		int version = current->version;
+		//int version = current->version;
 		
-//		DSU_DEBUG_PRINT("  < Lock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
-//		if (sem_wait(current->status_sem) == 0) {
+		//DSU_DEBUG_PRINT("  < Lock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
+		//if (sem_wait(current->status_sem) == 0) {
 		
-//			version = current->status[DSU_VERSION];
+		//	version = current->status[DSU_VERSION];
 
-//			DSU_DEBUG_PRINT("  > Unlock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
-//			sem_post(current->status_sem);
-//		}
+		//	DSU_DEBUG_PRINT("  > Unlock status %d (%d-%d)\n", current->port, (int) getpid(), (int) gettid());
+		//	sem_post(current->status_sem);
+		//}
 
 		
-//		if (	current->version >= version
-//			|| 	current->monitoring != 0
-//			||  current->comfds != NULL
-//			||	current->fds != NULL
-//			 )
-//			return 0;	
+			
 
-//		current = current->next;
+		current = current->next;
 
-//	}
+	}
 	
-//	return 1;
+	return 1;
 
-//}
+}
 
 
-//void dsu_terminate() {
-//	DSU_DEBUG_PRINT(" - Termination (%d-%d)\n", (int) getpid(), (int) gettid());
+void dsu_terminate() {
+	DSU_DEBUG_PRINT(" - Termination (%d-%d)\n", (int) getpid(), (int) gettid());
 	/*	Different models, such as master-worker model, are used to horizontally scale the application. This
 		can either be done with threads or processes. As threads are implemented as processes on linux, 
 		there is not difference in termination. The number of active workers is tracked in the event handler. 
 		The last active worker that terminates, terminates the group to ensure the full application stops. */
 	
     
-	/* 	In case of error do not terminate all processes. */
-//	int workers  = 1;
-	
-    
-//	DSU_DEBUG_PRINT(" < Lock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-//	if (sem_wait(dsu_program_state.lock) == 0) {
-		
-//		workers = --dsu_program_state.workers[0];	
-			
-//		DSU_DEBUG_PRINT(" > Unlock program state (%d-%d)\n", (int) getpid(), (int) gettid());
-//		sem_post(dsu_program_state.lock);
-//	}
+	int workers = dsu_deactivate_process();
 
+    DSU_DEBUG_PRINT("  - workers: %d (pg:%d, pid:%d, tid:%d)\n", workers, (int) getpgid(getpid()), (int) getpid(), (int) gettid());
+	if (workers == 0) {
+		DSU_DEBUG_PRINT("  - Kill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
+		killpg(getpgid(getpid()), SIGKILL);
+	}
 
-//    DSU_DEBUG_PRINT("  - worker: %d (pg:%d, pid:%d, tid:%d)\n", workers, (int) getpgid(getpid()), (int) getpid(), (int) gettid());
-//	if (workers == 0) {
-//		DSU_DEBUG_PRINT("  - All (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
-//		killpg(getpgid(getpid()), SIGKILL);
-//	}
+    killpg(getpid(), SIGTERM);
 
+}
 
-//	exit(EXIT_SUCCESS);
+int dsu_change_number_of_workers(int delta) {
 
-//}
-
-
-int dsu_activate_process(void) {
-		
-	DSU_DEBUG_PRINT(" < Lock process file (%d-%d)\n", (int) getpid(), (int) gettid());
+    DSU_DEBUG_PRINT(" < Lock process file (%d-%d)\n", (int) getpid(), (int) gettid());
     fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.write_lock);
     
-    char buf[2] = { 0 };    
-    if (dsu_read(dsu_program_state.processes, buf, 1) == -1) return -1;
-    int size = strtol(buf, NULL, 10) + 1;
+    char buf[2] = {0};
+    lseek(dsu_program_state.processes, 0, SEEK_SET); 
+    if (dsu_read(dsu_program_state.processes, buf, 1) == -1) {
+        return -1;
+    }
     
-    DSU_DEBUG_PRINT(" - Number of processes set to %d (%d-%d)\n", size, (int) getpid(), (int) gettid());
-    buf[0] = (char) (size + '0');
-    if (dsu_write(dsu_program_state.processes, buf, 1)) return -1;
+    int _size = strtol(buf, NULL, 10);
+    int size = _size + delta;
+    DSU_DEBUG_PRINT(" - Number of processes %d to %d (%d-%d)\n", _size, size, (int) getpid(), (int) gettid());
+    
+    buf[0] = size + '0';
+    lseek(dsu_program_state.processes, 0, SEEK_SET);
+    if (dsu_write(dsu_program_state.processes, buf, 1) == -1) {
+        return -1;
+    }
     
     DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
     fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.write_lock);
     
-    return 0;
-	
+    return size;
+
 }
 
-void dsu_configure_process(void) {
-	dsu_forall_sockets(dsu_program_state.binds, dsu_configure_socket);
+int dsu_deactivate_process(void) {
+    return dsu_change_number_of_workers(-1);
 }
+
+int dsu_activate_process(void) {
+	return dsu_change_number_of_workers(1);
+}
+
+//void dsu_configure_process(void) {
+//	dsu_forall_sockets(dsu_program_state.binds, dsu_configure_socket);
+//}
 			
 
 int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
@@ -428,6 +437,9 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_open = dlsym(RTLD_NEXT, "open");
 	dsu_creat = dlsym(RTLD_NEXT, "creat");
 
+    dsu_sigaction = dlsym(RTLD_NEXT, "sigaction");
+    dsu_signal = dlsym(RTLD_NEXT, "signal");
+
 	/* 	Set default function for event-handler wrapper functions. */
 	dsu_select = dlsym(RTLD_NEXT, "select");
 	//dsu_poll = dlsym(RTLD_NEXT, "poll");
@@ -437,89 +449,71 @@ static __attribute__((constructor)) void dsu_init() {
 	//dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
 	//dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
 
-
-    printf("test\n");
     
     int len = snprintf(NULL, 0, "/tmp/dsu_processes_%d.pid", (int) getpid());
 	char temp_path[len+1];
 	sprintf(temp_path, "/tmp/dsu_processes_%d.pid", (int) getpid());
-    printf("test %d %s\n", len, temp_path);
     dsu_program_state.processes = open(temp_path, O_RDWR | O_CREAT, 0600);
     if (dsu_program_state.processes <= 0) {
         perror("DSU \"Error opening process file\"");
 		exit(EXIT_FAILURE);
     }
     unlink(temp_path);
-    printf("test\n");
     char buf = 0 + '0';
-    printf("buf: %c fd:%d\n", buf, dsu_program_state.processes);
     if (dsu_write(dsu_program_state.processes, &buf, 1) == -1) {
         perror("DSU \"Error initiating process file\"");
 		exit(EXIT_FAILURE);
     }
-
-     printf("test >>\n");
     
     return;
 }
 
 
-/*
-void dsu_sigchild_suppressor(int signum) {	
-	DSU_DEBUG_PRINT("Signal suppressor() (%d-%d)\n", (int) getpid(), (int) gettid());
-	
-	if (*dsu_program_state.workers == 0) {
-		DSU_DEBUG_PRINT(" - Suppress() (%d-%d)\n", (int) getpid(), (int) gettid());
-		return; 
-	}
-	
-	dsu_handler(signum);
-	
-}
+//void dsu_sigchild_suppressor(int signum) {	
+//	DSU_DEBUG_PRINT("Signal suppressor() (%d-%d)\n", (int) getpid(), (int) gettid());
+//	DSU_DEBUG_PRINT(" - Suppress() (%d-%d)\n", (int) getpid(), (int) gettid());	
+//}
 
 
-void dsu_sigchild_suppressor(int signo, siginfo_t *siginfo, void *ucontext) {
-	DSU_DEBUG_PRINT("Signal suppressor() (%d-%d)\n", (int) getpid(), (int) gettid());
+//void dsu_sigchild_suppressor(int signo, siginfo_t *siginfo, void *ucontext) {
+//	DSU_DEBUG_PRINT("Signal suppressor() (%d-%d)\n", (int) getpid(), (int) gettid());
+//   DSU_DEBUG_PRINT(" - Suppress() (%d-%d)\n", (int) getpid(), (int) gettid());
 
-	if (*dsu_program_state.workers == 0) {
-		DSU_DEBUG_PRINT(" - Suppress() (%d-%d)\n", (int) getpid(), (int) gettid());
-		return; 
-	}
+//	if (*dsu_program_state.workers == 0) {
+//		DSU_DEBUG_PRINT(" - Suppress() (%d-%d)\n", (int) getpid(), (int) gettid());
+//		return; 
+//	}
 	
-	dsu_sigaction(signo, siginfo, ucontext);
+//	dsu_sigaction(signo, siginfo, ucontext);
 
-}
+//}
 
 
 sighandler_t signal(int signum, sighandler_t handler) {
-	DSU_DEBUG_PRINT("Signal() (%d-%d)\n", (int) getpid(), (int) gettid());
-	
+	DSU_DEBUG_PRINT("Signal() %d (%d-%d)\n", signum, (int) getpid(), (int) gettid());	
 
-	if (signum == SIGCHLD) {
-		dsu_handler = handler;
-		return dsu_signal(SIGCHLD, sigchild_suppressor);
-	}
+	//if (signum == SIGTERM) {
+	//	return 0;
+	//}
 	
-
 	return dsu_signal(signum, handler);
 
 }
 
 
 int sigaction(int signum, const struct sigaction *restrict act, struct sigaction *restrict oldact) {
-	DSU_DEBUG_PRINT("sigaction() (%d-%d)\n", (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT("sigaction() %d (%d-%d)\n", signum, (int) getpid(), (int) gettid());
+    //DSU_DEBUG_PRINT("test() %d (%d-%d)\n", SIGTERM, (int) getpid(), (int) gettid());
 
 	
-	if (signum == SIGCHLD) {
-		dsu_sigaction = act;
-		return dsu_sigaction(SIGCHLD, dsu_sigchild_suppressor, oldact);
+	if (signum == SIGTERM) {
+		return 0;
 	}
 
 	
 	return dsu_sigaction(signum, act, oldact);
 	
 }
-*/
 
 
 int socket(int domain, int type, int protocol) {

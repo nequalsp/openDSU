@@ -45,13 +45,14 @@ extern struct dsu_state_struct dsu_program_state;
 
 
 int dsu_request_fd(struct dsu_socket_list *dsu_sockfd);
-//int dsu_termination_detection();
-//void dsu_terminate();
+int dsu_termination_detection();
+void dsu_terminate();
 int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd);
 void dsu_monitor_fd(struct dsu_socket_list *dsu_sockfd);
 void dsu_configure_socket(struct dsu_socket_list *dsu_sockfd);
 int dsu_activate_process(void);
-void dsu_configure_process(void);
+int dsu_deactivate_process(void);
+//void dsu_configure_process(void);
 
 #define DSU_INITIALIZE_EVENT dsu_initialize_event()
 void dsu_initialize_event(void);

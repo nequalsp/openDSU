@@ -48,11 +48,13 @@ if loss_of_service:
 		f.write("seconds\n")
 		f.flush()
 		
-		subprocess.run(["pkill", "lighttpd"])
-
+		#subprocess.run(["pkill", "lighttpd"])
+		subprocess.run(["pkill", "nginx"])
+        
 		print('Start...')
-		subprocess.run(["openDSU", "./lighttpd.o", "-f", path + "config/lighttpd.conf"])
-		p = subprocess.Popen(["ab", "-g", "loss_of_service.plt", "-n", str(REQUESTS), "-r", "-s", "3000", "-c", "64", "http://localhost/v1.html"])
+		#subprocess.run(["openDSU", "./lighttpd.o", "-f", path + "config/lighttpd.conf"])
+		subprocess.run(["openDSU", "./nginx.o"])
+		p = subprocess.Popen(["ab", "-g", "loss_of_service.plt", "-n", str(REQUESTS), "-s", "60", "-c", "64", "http://localhost/v1.html"])
 		time.sleep(10)
 		
 		if os.fork() == 0:
@@ -65,12 +67,15 @@ if loss_of_service:
 				print('Update...')		
 				f.write(str(int(time.time())) + "\n")
 				f.flush()
-				subprocess.run(["openDSU", "./lighttpd.o", "-f", path + "config/lighttpd.conf"])
+				subprocess.run(["openDSU", "./nginx.o"])
+				#subprocess.run(["openDSU", "./lighttpd.o", "-f", path + "config/lighttpd.conf"])
 				time.sleep(10)
 			sys.exit(1)	
 		else:
-			p.wait()			
-			subprocess.run(["pkill", "lighttpd"])
+			p.wait()
+			print("kill...")
+			#subprocess.run(["pkill", "nginx"])
+			#subprocess.run(["pkill", "lighttpd"])
 	
 	print('End')
 

@@ -14,9 +14,15 @@
 
 
 int (*dsu_select)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
+//int (*dsu_pselect)(int, fd_set *, fd_set *, fd_set *, struct timeval *);
 int correction = 0;
 int max_fds = 0;
 int dsu_live = 0;
+
+int pselect(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, const struct timespec *timeout, const sigset_t *sigmask) {
+    DSU_DEBUG_PRINT(" - PSELECT (%d-%d)\n", (int) getpid(), (int) gettid());
+    return 0;
+}
 
 //int transfer = 0;
 
@@ -88,8 +94,9 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	
     struct dsu_fd_list *comfds =   dsu_sockfd->comfds;   
    	
+    DSU_DEBUG_PRINT(" - LOOP\n");
     while (comfds != NULL) {
-    
+        DSU_DEBUG_PRINT(" - check %d readfds %d set %d\n", comfds->fd, readfds != NULL, FD_ISSET(comfds->fd, readfds));    
         if (readfds != NULL && FD_ISSET(comfds->fd, readfds)) {
 
 			
@@ -118,16 +125,7 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
                 
                 struct dsu_fd_list *_comfds = comfds;
                 comfds = comfds->next;
-                dsu_socket_remove_fds(dsu_sockfd, _comfds->fd, DSU_INTERNAL_FD);
-
-			
-				/* Mark file descriptor as transferred. */
-				DSU_DEBUG_PRINT(" - port %d is ready in the new version\n", dsu_sockfd->port);
-				const char *buf = "ready";
-				if (dsu_send(dsu_sockfd->markreadyfd, &buf, 5, MSG_CONFIRM) < 0) {
-					DSU_DEBUG_PRINT(" - send to readyfd %d failed\n", dsu_sockfd->readyfd);
-				}
-				
+                dsu_socket_remove_fds(dsu_sockfd, _comfds->fd, DSU_INTERNAL_FD);		
                 
                 continue;
             } 
@@ -142,6 +140,24 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
             else if (r == -1)
                 port = -1;
             
+            if (buffer == 1) {
+                
+                /* Mark file descriptor as transferred. */
+				DSU_DEBUG_PRINT(" - port %d is ready in the new version\n", dsu_sockfd->port);
+				const char *buf = "ready";
+				if (dsu_send(dsu_sockfd->markreadyfd, &buf, 5, MSG_CONFIRM) < 0) {
+					DSU_DEBUG_PRINT(" - send to readyfd %d failed\n", dsu_sockfd->readyfd);
+				}
+				
+                dsu_close(comfds->fd);
+
+                struct dsu_fd_list *_comfds = comfds;
+                comfds = comfds->next;
+                dsu_socket_remove_fds(dsu_sockfd, _comfds->fd, DSU_INTERNAL_FD);
+
+				continue;
+            
+            } else {
             
 			//if (port != -1) {
 				
@@ -156,9 +172,10 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			//}
 
 			
-            DSU_DEBUG_PRINT(" - Send file descriptors %d & %d on %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->comfd, comfds->fd, (int) getpid(), (int) gettid());
-            dsu_write_fd(comfds->fd, dsu_sockfd->shadowfd, port); // handle return value;
-			dsu_write_fd(comfds->fd, dsu_sockfd->comfd, port);
+                DSU_DEBUG_PRINT(" - Send file descriptors %d & %d on %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->comfd, comfds->fd, (int) getpid(), (int) gettid());
+                dsu_write_fd(comfds->fd, dsu_sockfd->shadowfd, port); // handle return value;
+			    dsu_write_fd(comfds->fd, dsu_sockfd->comfd, port);
+            }
 			
 			
         }
@@ -180,8 +197,13 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 		// Mark ready to be listening.
 		if (dsu_sockfd->comfd_close > 0) {
 			DSU_DEBUG_PRINT(" - port %d is ready in on the side of the new version\n", dsu_sockfd->port);
-			dsu_close(dsu_sockfd->comfd_close);
-			dsu_sockfd->comfd_close = -1;
+            DSU_DEBUG_PRINT(" - send ready %d\n", dsu_sockfd->comfd_close);
+            int buf = 1;
+            if (dsu_send(dsu_sockfd->comfd_close, &buf, sizeof(int), MSG_CONFIRM) != -1) {
+                DSU_DEBUG_PRINT(" - close %d\n", dsu_sockfd->comfd_close);
+			    dsu_close(dsu_sockfd->comfd_close);
+			    dsu_sockfd->comfd_close = -1;
+            }
 		}
 
 		
@@ -255,7 +277,9 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
         FD_CLR(dsu_sockfd->shadowfd, readfds);
 		if (!dsu_sockfd->ready) {
         	FD_SET(dsu_sockfd->fd, readfds);
-        }
+        } else {
+			++correction;
+		}
     }
 	
 
@@ -299,7 +323,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	
 
 	/* 	On first call to select, mark worker active and configure binded sockets. */
-	if (!dsu_live) {	
+	if (!dsu_live) {
 		if (dsu_activate_process() > 0) dsu_live = 1;
     }
 		
@@ -312,9 +336,9 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	//dsu_forall_sockets(dsu_program_state.binds, dsu_monitor_fd);
     
 
-	//if (dsu_termination_detection()) {
-	//	dsu_terminate();
-	//}
+	if (dsu_termination_detection()) {
+		dsu_terminate();
+	}
 	
 
     /*  Convert to shadow file descriptors, this must be done for binded sockets. */
@@ -339,7 +363,7 @@ int select(int nfds, fd_set *readfds, fd_set *writefds, fd_set *exceptfds, struc
 	DSU_DEBUG_PRINT(" - Size: %d (%d-%d)\n", max_fds, (int) getpid(), (int) gettid());
 	#endif
 
-
+    
     int result = dsu_select(max_fds, readfds, writefds, exceptfds, timeout);
     if (result == -1) {
 		DSU_DEBUG_PRINT(" - error: (%d-%d)\n", (int) getpid(), (int) gettid());
