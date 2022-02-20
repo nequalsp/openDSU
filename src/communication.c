@@ -17,7 +17,7 @@ int dsu_write_fd(int fd, int sendfd, int port) {
     
     /* Check whether the socket is valid. */
     int error; socklen_t len; 
-    if (dsu_getsockopt(sendfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0) {
+    if (getsockopt(sendfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0) {
         return -1;
 	}
     
@@ -49,7 +49,7 @@ int dsu_write_fd(int fd, int sendfd, int port) {
 	msg.msg_iov = iov;
 	msg.msg_iovlen = 1;
 
-	return (dsu_sendmsg(fd, &msg, 0));
+	return (sendmsg(fd, &msg, 0));
 }
 
 
@@ -89,7 +89,7 @@ int dsu_read_fd(int fd, int *recvfd, int *port) {
 	msg.msg_iovlen = 1;
 
 	/* These calls return the number of bytes received, or -1 if an error occurred. The return value will be 0 when the peer has performed an orderly shutdown. */
-	if ( (n = dsu_recvmsg(fd, &msg, 0)) <= 0)
+	if ( (n = recvmsg(fd, &msg, 0)) <= 0)
 		return (n);
 
 	#ifdef  HAVE_MSGHDR_MSG_CONTROL

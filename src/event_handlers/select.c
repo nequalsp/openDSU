@@ -107,7 +107,7 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
             
             
             /*  Race condition on recv, hence do not wait, and continue on error. */
-            int r = dsu_recv(comfds->fd, &buffer, sizeof(buffer), MSG_DONTWAIT);
+            int r = recv(comfds->fd, &buffer, sizeof(buffer), MSG_DONTWAIT);
             
             
             /*  Connection is closed by client. */
@@ -141,7 +141,7 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
                 /* Mark file descriptor as transferred. */
 				DSU_DEBUG_PRINT(" - port %d is ready in the new version\n", dsu_sockfd->port);
 				const char *buf = "ready";
-				if (dsu_send(dsu_sockfd->markreadyfd, &buf, 5, MSG_CONFIRM) < 0) {
+				if (send(dsu_sockfd->markreadyfd, &buf, 5, MSG_CONFIRM) < 0) {
 					DSU_DEBUG_PRINT(" - send to readyfd %d failed\n", dsu_sockfd->readyfd);
 				}
 				
@@ -183,22 +183,12 @@ void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			DSU_DEBUG_PRINT(" - port %d is ready in on the side of the new version\n", dsu_sockfd->port);
             DSU_DEBUG_PRINT(" - send ready %d\n", dsu_sockfd->comfd_close);
             int buf = 1;
-            if (dsu_send(dsu_sockfd->comfd_close, &buf, sizeof(int), MSG_CONFIRM) != -1) {
+            if (send(dsu_sockfd->comfd_close, &buf, sizeof(int), MSG_CONFIRM) != -1) {
                 DSU_DEBUG_PRINT(" - close %d\n", dsu_sockfd->comfd_close);
 			    dsu_close(dsu_sockfd->comfd_close);
 			    dsu_sockfd->comfd_close = -1;
             }
 		}
-
-		
-		/*  Deactivate original file descriptor. */
-		//FD_CLR(dsu_sockfd->fd, readfds);
-
-		
-		/*  Set shadow file descriptor. */
-		//DSU_DEBUG_PRINT(" - Set %d => %d (%d-%d)\n", dsu_sockfd->fd, dsu_sockfd->shadowfd, (int) getpid(), (int) gettid());
-		//FD_SET(dsu_sockfd->shadowfd, readfds);
-		//if (max_fds < dsu_sockfd->shadowfd + 1) max_fds = dsu_sockfd->shadowfd + 1;
 
 
     }
@@ -215,8 +205,6 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 
 	
     if (readfds != NULL && FD_ISSET(dsu_sockfd->fd, readfds)) {
-		//DSU_DEBUG_PRINT(" - remove  %d => %d (%d-%d)\n", dsu_sockfd->shadowfd, dsu_sockfd->fd, (int) getpid(), (int) gettid());
-        //FD_CLR(dsu_sockfd->shadowfd, readfds);
 		if (dsu_sockfd->ready) {
 			DSU_DEBUG_PRINT(" - remove public  %d (%d-%d)\n", dsu_sockfd->fd, (int) getpid(), (int) gettid());
 			FD_CLR(dsu_sockfd->fd, readfds);

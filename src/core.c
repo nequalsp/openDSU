@@ -24,10 +24,10 @@
 #include <fcntl.h>
 #include <poll.h>
 
+
 #include "core.h"
 #include "state.h"
 #include "communication.h"
-#include "utils.h"
 
 
 #include "event_handlers/select.h"
@@ -45,27 +45,12 @@ struct dsu_state_struct dsu_program_state;
 	created to maintain shadow data structures of the file descriptors. */
 int (*dsu_socket)(int, int, int);
 int (*dsu_bind)(int, const struct sockaddr *, socklen_t);
-int (*dsu_listen)(int, int);
 int (*dsu_accept)(int, struct sockaddr *restrict, socklen_t *restrict);
 int (*dsu_accept4)(int, struct sockaddr *restrict, socklen_t *restrict, int);
-int (*dsu_shutdown)(int, int);
 int (*dsu_close)(int);
-int (*dsu_dup)(int);
-int (*dsu_dup2)(int, int);
-int (*dsu_dup3)(int, int, int);
-ssize_t (*dsu_read)(int, void *, size_t);
-ssize_t (*dsu_recv)(int, void *, size_t, int);
-ssize_t (*dsu_recvfrom)(int, void *restrict, size_t, int, struct sockaddr *restrict, socklen_t *restrict);
-ssize_t (*dsu_recvmsg)(int, struct msghdr *, int);
-ssize_t (*dsu_write)(int, const void *, size_t);
-ssize_t (*dsu_send)(int, const void *, size_t, int);
-ssize_t (*dsu_sendto)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
-ssize_t (*dsu_sendmsg)(int, const struct msghdr *, int);
 sighandler_t (*dsu_signal)(int signum, sighandler_t handler);
 int (*dsu_sigaction)(int signum, const struct sigaction *restrict act, struct sigaction *restrict oldact);
 
-int (*dsu_open)(const char *, int, mode_t);
-int (*dsu_creat)(const char *, mode_t);
 
 int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 	DSU_DEBUG_PRINT(" - Inherit fd %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
@@ -79,7 +64,7 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
         
 		
         DSU_DEBUG_PRINT("  - Send on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-        if ( dsu_send(dsu_sockfd->comfd, &dsu_sockfd->port, sizeof(dsu_sockfd->port), 0) > 0) {
+        if ( send(dsu_sockfd->comfd, &dsu_sockfd->port, sizeof(dsu_sockfd->port), 0) > 0) {
 
 
             DSU_DEBUG_PRINT("  - Receive on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
@@ -167,7 +152,7 @@ int dsu_change_number_of_workers(int delta) {
     
     char buf[2] = {0};
     lseek(dsu_program_state.processes, 0, SEEK_SET); 
-    if (dsu_read(dsu_program_state.processes, buf, 1) == -1) {
+    if (read(dsu_program_state.processes, buf, 1) == -1) {
         return -1;
     }
     
@@ -177,7 +162,7 @@ int dsu_change_number_of_workers(int delta) {
     
     buf[0] = size + '0';
     lseek(dsu_program_state.processes, 0, SEEK_SET);
-    if (dsu_write(dsu_program_state.processes, buf, 1) == -1) {
+    if (write(dsu_program_state.processes, buf, 1) == -1) {
         return -1;
     }
     
@@ -209,12 +194,12 @@ int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
     if (dsu_bind(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t) sizeof(dsu_sockfd->comfd_addr)) == 0) {
         
 		
-        if (dsu_listen(dsu_sockfd->comfd, DSU_MAXNUMOFPROC) == 0) {
+        if (listen(dsu_sockfd->comfd, DSU_MAXNUMOFPROC) == 0) {
             
 			
 			/* 	Set socket to non-blocking, several processes might be accepting connections. */
-			int flags = dsu_fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK;
-			dsu_fcntl(dsu_sockfd->comfd, F_SETFL, (char *) &flags);
+			int flags = fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK;
+			fcntl(dsu_sockfd->comfd, F_SETFL, (char *) &flags);
 			
 			
             DSU_DEBUG_PRINT(" - Initialized communication on  %d fd: %d (%d-%d)\n", dsu_sockfd->port, dsu_sockfd->comfd, (int) getpid(), (int) gettid());
@@ -268,35 +253,13 @@ static __attribute__((constructor)) void dsu_init() {
 		order after the current library*/
 	dsu_socket = dlsym(RTLD_NEXT, "socket");
 	dsu_bind = dlsym(RTLD_NEXT, "bind");
-	dsu_listen = dlsym(RTLD_NEXT, "listen");
 	dsu_accept = dlsym(RTLD_NEXT, "accept");
 	dsu_accept4 = dlsym(RTLD_NEXT, "accept4");
-	dsu_shutdown = dlsym(RTLD_NEXT, "shutdown");
 	dsu_close = dlsym(RTLD_NEXT, "close");
-	dsu_fcntl = dlsym(RTLD_NEXT, "fcntl");
-	dsu_ioctl = dlsym(RTLD_NEXT, "ioctl");
-	dsu_dup = dlsym(RTLD_NEXT, "dup");
-	dsu_dup2 = dlsym(RTLD_NEXT, "dup2");
-	dsu_dup3 = dlsym(RTLD_NEXT, "dup3");
-	dsu_getsockopt = dlsym(RTLD_NEXT, "getsockopt");
-	dsu_setsockopt = dlsym(RTLD_NEXT, "setsockopt");
-	dsu_getsockname = dlsym(RTLD_NEXT, "getsockname");
-	dsu_getpeername = dlsym(RTLD_NEXT, "getpeername");
-	dsu_read = dlsym(RTLD_NEXT, "read");
-	dsu_recv = dlsym(RTLD_NEXT, "recv");
-	dsu_recvfrom = dlsym(RTLD_NEXT, "recvfrom");
-	dsu_recvmsg = dlsym(RTLD_NEXT, "recvmsg");
-	dsu_write = dlsym(RTLD_NEXT, "write");
-	dsu_send = dlsym(RTLD_NEXT, "send");
-	dsu_sendto = dlsym(RTLD_NEXT, "sendto");
-	dsu_sendmsg = dlsym(RTLD_NEXT, "sendmsg");
-
-	dsu_open = dlsym(RTLD_NEXT, "open");
-	dsu_creat = dlsym(RTLD_NEXT, "creat");
-
     dsu_sigaction = dlsym(RTLD_NEXT, "sigaction");
     dsu_signal = dlsym(RTLD_NEXT, "signal");
-
+	
+	
 	/* 	Set default function for event-handler wrapper functions. */
 	dsu_select = dlsym(RTLD_NEXT, "select");
 	//dsu_poll = dlsym(RTLD_NEXT, "poll");
@@ -317,7 +280,7 @@ static __attribute__((constructor)) void dsu_init() {
     }
     unlink(temp_path);
     char buf = 0 + '0';
-    if (dsu_write(dsu_program_state.processes, &buf, 1) == -1) {
+    if (write(dsu_program_state.processes, &buf, 1) == -1) {
         perror("DSU \"Error initiating process file\"");
 		exit(EXIT_FAILURE);
     }
@@ -374,80 +337,6 @@ int socket(int domain, int type, int protocol) {
     
     return sockfd;
 }
-
-
-//int dup(int oldfd) {
-//	DSU_DEBUG_PRINT("Dup() (%d-%d)\n", (int) getpid(), (int) gettid());
-//	return dsu_dup(dsu_shadowfd(oldfd));
-//}
-
-
-//int dup2(int oldfd, int newfd) {
-//	DSU_DEBUG_PRINT("Dup2() (%d-%d)\n", (int) getpid(), (int) gettid());
-//	return dsu_dup2(dsu_shadowfd(oldfd), dsu_shadowfd(newfd));
-//}
-
-
-//int dup3(int oldfd, int newfd, int flags) {
-//	DSU_DEBUG_PRINT("Dup3() (%d-%d)\n", (int) getpid(), (int) gettid());
-//	int fd = dsu_dup3(dsu_shadowfd(oldfd), dsu_shadowfd(newfd), flags);
-//	DSU_DEBUG_PRINT(" - %d = %d (%d-%d)\n", fd, oldfd, (int) getpid(), (int) gettid());
-//	return fd;
-//}
-
-
-//int creat(const char *pathname, mode_t mode) {
-//	DSU_DEBUG_PRINT("creat() %s (%d-%d)\n", pathname, (int) getpid(), (int) gettid());
-//	return dsu_creat(pathname, mode);
-//}
-
-
-//ssize_t read(int fd, void *buf, size_t count) {
-//	DSU_DEBUG_PRINT("read() %d -> %d (%d-%d)\n", fd, dsu_shadowfd(fd), (int) getpid(), (int) gettid());
-//	return dsu_read(dsu_shadowfd(fd), buf, count);
-//}
-
-
-//ssize_t recv(int sockfd, void *buf, size_t len, int flags) {
-//	DSU_DEBUG_PRINT("recv() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-//	return dsu_recv(dsu_shadowfd(sockfd), buf, len, flags);
-//}
-
-
-//ssize_t recvfrom(int sockfd, void *restrict buf, size_t len, int flags, struct sockaddr *restrict src_addr, socklen_t *restrict addrlen) {
-//	DSU_DEBUG_PRINT("recvfrom() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-//	return dsu_recvfrom(dsu_shadowfd(sockfd), buf, len, flags, src_addr, addrlen);
-//}
-
-
-//ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags) {
-//	DSU_DEBUG_PRINT("recvmsg() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-//	return dsu_recvmsg(dsu_shadowfd(sockfd), msg, flags);
-//}
-
-
-//ssize_t write(int fd, const void *buf, size_t count) {
-//	DSU_DEBUG_PRINT("write() %d -> %d (%d-%d)\n", fd, dsu_shadowfd(fd), (int) getpid(), (int) gettid());
-//	return dsu_write(dsu_shadowfd(fd), buf, count);
-//}
-
-
-//ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
-//	DSU_DEBUG_PRINT("send() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-//	return dsu_send(dsu_shadowfd(sockfd), buf, len, flags);
-//}
-
-
-//ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen) {
-//	DSU_DEBUG_PRINT("sendto() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-//	return dsu_sendto(dsu_shadowfd(sockfd), buf, len, flags, dest_addr, addrlen);
-//}
-
-
-//ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags) {
-//	DSU_DEBUG_PRINT("sendmsg() %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-//	return dsu_sendmsg(dsu_shadowfd(sockfd), msg, flags);
-//}
 
 
 int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
@@ -521,17 +410,6 @@ int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen) {
 }
 
 
-//int listen(int sockfd, int backlog) {
-//    DSU_DEBUG_PRINT("Listen() on fd %d -> %d (%d-%d)\n", sockfd, dsu_shadowfd(sockfd), (int) getpid(), (int) gettid());
-    /*  listen() marks the socket referred to by sockfd as a passive socket, that is, as a socket that will be
-        used to accept incoming connection requests using accept(). */
-    
-	/*	Second and subsequent calls to listen() have no other effect. */
-//	return dsu_listen(dsu_shadowfd(sockfd), backlog);
-//	
-//}
-
-
 int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen) {
 	DSU_DEBUG_PRINT("Accept() (%d-%d)\n", (int) getpid(), (int) gettid());   
     /*  The accept() system call is used with connection-based socket types (SOCK_STREAM, SOCK_SEQPACKET).  It extracts the first
@@ -573,12 +451,6 @@ int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addr
 
     return sessionfd;   
 }
-
-
-//int shutdown(int sockfd, int how) {
-//	DSU_DEBUG_PRINT("Shutdown() (%d-%d)\n", (int) getpid(), (int) gettid());
-//	return dsu_shutdown(dsu_shadowfd(sockfd), how);
-//}
 
 
 int close(int sockfd) {
