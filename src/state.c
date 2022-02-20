@@ -19,7 +19,7 @@ void dsu_socket_list_init(struct dsu_socket_list *dsu_socket) {
     dsu_socket->ready		= 0;
     
 	
-	memset(&dsu_socket->ev, 0, sizeof(struct epoll_event));
+	//memset(&dsu_socket->ev, 0, sizeof(struct epoll_event));
 
 }
 
@@ -185,15 +185,15 @@ struct dsu_socket_list *dsu_sockets_search_fds(struct dsu_socket_list *node, int
 }
 
 
-int dsu_is_internal_conn(int fd) {
+//int dsu_is_internal_conn(int fd) {
 	/*	If socket is not used for monitoring or internal connection, it is not an internal connection. */
 	
-	if ( dsu_sockets_search_fds(dsu_program_state.binds, fd, DSU_MONITOR_FD) != NULL) return 1;
+//	if ( dsu_sockets_search_fds(dsu_program_state.binds, fd, DSU_MONITOR_FD) != NULL) return 1;
 
 
-	if ( dsu_sockets_search_fds(dsu_program_state.binds, fd, DSU_INTERNAL_FD) != NULL) return 1;
+//	if ( dsu_sockets_search_fds(dsu_program_state.binds, fd, DSU_INTERNAL_FD) != NULL) return 1;
 	
 
- 	return 0;
+ //	return 0;
 
-}
+//}

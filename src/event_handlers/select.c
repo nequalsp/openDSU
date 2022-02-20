@@ -199,12 +199,15 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Change shadow file descripter to its original file descriptor. */
 
 
-    if (FD_ISSET(dsu_sockfd->readyfd, readfds)) {
+    if (readfds != NULL && FD_ISSET(dsu_sockfd->readyfd, readfds)) {
         dsu_sockfd->ready = 1;
+		++correction;
+		FD_CLR(dsu_sockfd->readyfd, readfds);
     }
 
 	
     if (readfds != NULL && FD_ISSET(dsu_sockfd->fd, readfds)) {
+
 		if (dsu_sockfd->ready) {
 			DSU_DEBUG_PRINT(" - remove public  %d (%d-%d)\n", dsu_sockfd->fd, (int) getpid(), (int) gettid());
 			FD_CLR(dsu_sockfd->fd, readfds);
@@ -213,10 +216,10 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     }
 	
 
-	if (readfds != NULL && FD_ISSET(dsu_sockfd->readyfd, readfds)) {
-		++correction;
-		FD_CLR(dsu_sockfd->readyfd, readfds);
-	}
+	//if (readfds != NULL && FD_ISSET(dsu_sockfd->readyfd, readfds)) {
+	//	++correction;
+	//	FD_CLR(dsu_sockfd->readyfd, readfds);
+	//}
 	
         
 }

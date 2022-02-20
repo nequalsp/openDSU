@@ -32,7 +32,7 @@
 
 #include "event_handlers/select.h"
 //#include "event_handlers/poll.h"
-//#include "event_handlers/epoll.h"
+#include "event_handlers/epoll.h"
 
 
 /* 	Global variable containing pointers to the used data structures and state of the program. Every binded file descriptor
@@ -264,9 +264,9 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_select = dlsym(RTLD_NEXT, "select");
 	//dsu_poll = dlsym(RTLD_NEXT, "poll");
 	//dsu_ppoll = dlsym(RTLD_NEXT, "ppoll");
-	//dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
-	//dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
-	//dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
+	dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
+	dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
+	dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
 	//dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
 
     

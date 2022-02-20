@@ -39,7 +39,7 @@ struct dsu_socket_list {
 	struct dsu_fd_list *fds;		// Accepted connections.
     
 	
-	struct epoll_event ev;			// Needed in Epoll.
+	//struct epoll_event ev;			// Needed in Epoll.
     
 
     /*  Linked list with accepted connections used for communication
@@ -120,7 +120,7 @@ void dsu_socket_remove_fds(struct dsu_socket_list *node, int comfd, int flag);
 struct dsu_socket_list *dsu_sockets_search_fds(struct dsu_socket_list *node, int sockfd, int flag);
 
 /* 	Check if the file descriptor is an internal connection. */
-int dsu_is_internal_conn(int fd);
+// dsu_is_internal_conn(int fd);
 
 #endif
 

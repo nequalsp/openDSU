@@ -64,7 +64,7 @@ int main (int argc, char **argv) {
        exit(EXIT_FAILURE);
    }
 
-	
+   printf("Start listening on port %d...\n", PORT);	
    for (;;) {
 		
        nfds = epoll_wait(epollfd, events, MAX_EVENTS, -1);
