@@ -19,14 +19,7 @@ void dsu_socket_list_init(struct dsu_socket_list *dsu_socket) {
 	dsu_socket->readyfd		= -1;
     dsu_socket->ready		= 0;
     
-    
-	//dsu_socket->status      = NULL;
-	//dsu_socket->monitoring	= 0;
-	//dsu_socket->status_sem	= 0;
-	//dsu_socket->fd_sem		= 0;	
-	//dsu_socket->locked		= 0;
-	//dsu_socket->transfer 	= 0;
-    //dsu_socket->blocking 	= 0;
+	
 	memset(&dsu_socket->ev, 0, sizeof(struct epoll_event));
 
 }

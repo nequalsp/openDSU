@@ -56,20 +56,6 @@ struct dsu_socket_list {
     int ready;
 	
 
-    /*  Status. */
-	//int monitoring;
-	//int version;
-	//int locked;
-	//int transfer;
-    //int blocking;
-	
-
-	/* 	Multi- process & threading. */
-	//sem_t *status_sem;
-	//sem_t *fd_sem;	
-    //int *status;
-
-
 	struct dsu_socket_list *next;
 
 	
@@ -93,11 +79,6 @@ struct dsu_state_struct {
 	struct flock *write_lock;
     struct flock *unlock;
     
-	/* Termination information. */
-	//int live;
-	//int *workers;
-	//sem_t *lock;
-
 
 };
 
