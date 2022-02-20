@@ -29,7 +29,7 @@ build: ../openDSU ../libopenDSU.so core.o ../log
 
 
 ../libopenDSU.so: $(OBJS) $(EVENT_OBJS)
-	$(CC) $(CFLAGS) -shared -fPIC core.c -o $@ $^ $(DEBUG) -ldl -lrt
+	$(CC) $(CFLAGS) -shared -fPIC core.c -o $@ $^ $(DEBUG) -ldl
 
 
 ../openDSU: exec.c

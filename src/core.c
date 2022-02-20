@@ -11,18 +11,18 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <signal.h>
-#include <sys/stat.h>
+//#include <sys/stat.h>
 #include <sys/types.h>
-#include <sys/ipc.h>
-#include <sys/shm.h>
-#include <semaphore.h>
-#include <pthread.h>
-#include <sys/msg.h>
+//#include <sys/ipc.h>
+//#include <sys/shm.h>
+//#include <semaphore.h>
+//#include <pthread.h>
+//#include <sys/msg.h>
 #include <dlfcn.h>
-#include <sys/mman.h>
-#include <stdarg.h>
+//#include <sys/mman.h>
+//#include <stdarg.h>
 #include <fcntl.h>
-#include <poll.h>
+//#include <poll.h>
 
 
 #include "core.h"
