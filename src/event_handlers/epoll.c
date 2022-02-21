@@ -39,6 +39,7 @@ void dsu_epoll_internal_conn(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 	
 	/* Mark ready to be listening. */
 	if (dsu_sockfd->comfd_close > 0) {
+		//DSU_TEST_PRINT("Send port is ready %d in the new version\n", dsu_sockfd->port);
 		DSU_DEBUG_PRINT(" - port %d is ready in on the side of the new version\n", dsu_sockfd->port);
         DSU_DEBUG_PRINT(" - send ready %d\n", dsu_sockfd->comfd_close);
         int buf = 1;
@@ -54,16 +55,23 @@ void dsu_epoll_internal_conn(struct dsu_socket_list *dsu_sockfd, int epollfd) {
 	ev.events = EPOLLIN;
 	
 
-	DSU_DEBUG_PRINT(" - Add %d (%d)\n", dsu_sockfd->comfd, (int) getpid());
-    ev.data.fd = dsu_sockfd->comfd;
-	epoll_ctl(epollfd, EPOLL_CTL_ADD, dsu_sockfd->comfd, &ev); // TO DO handle error
+	if (!dsu_sockfd->ready) {
 
+		DSU_DEBUG_PRINT(" - Add %d (%d)\n", dsu_sockfd->comfd, (int) getpid());
+   		ev.data.fd = dsu_sockfd->comfd;
+		epoll_ctl(epollfd, EPOLL_CTL_ADD, dsu_sockfd->comfd, &ev); // TO DO handle error
 
-    if (!dsu_sockfd->ready) {
 		DSU_DEBUG_PRINT(" - Add %d (%d)\n", dsu_sockfd->readyfd, (int) getpid());
     	ev.data.fd = dsu_sockfd->readyfd;
 		epoll_ctl(epollfd, EPOLL_CTL_ADD, dsu_sockfd->readyfd, &ev); // TO DO handle error
-    }
+		
+    } 
+	//else {
+
+	//	epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->comfd, NULL);
+	//	epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->readyfd, NULL);
+		
+	//}
 	
 
 	/* Contains zero or more accepted connections. */
@@ -93,7 +101,7 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 				
 
 		/* 	Accept connection requests. */
-		if (events[i].data.fd == dsu_sockfd->comfd) {
+		if (events[i].data.fd == dsu_sockfd->comfd && !dsu_sockfd->ready) {
 
 
 			/*  Race conditions could happend when a "late" fork is performed. The fork happend after 
@@ -103,15 +111,17 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 			
 
 			if ( acc != -1) {
-				DSU_DEBUG_PRINT("  - Accept %d on %d (%d)\n", acc, dsu_sockfd->comfd, (int) getpid());
+				//DSU_TEST_PRINT("Accept internal connection %d on %d \n", acc, dsu_sockfd->comfd);
+				DSU_DEBUG_PRINT("  - Accept Internal request %d on %d (%d)\n", acc, dsu_sockfd->comfd, (int) getpid());
 				dsu_socket_add_fds(dsu_sockfd, acc, DSU_INTERNAL_FD);
-			} else
+			} else {
 				DSU_DEBUG_PRINT("  - Accept failed (%d)\n", (int) getpid());
-
+			}
+			
 
 			/* Remove */
 			events[i].data.fd = -1;
-			epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->readyfd, NULL);
+			epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->comfd, NULL);
 
 
 			continue;
@@ -123,9 +133,13 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 		if (events[i].data.fd == dsu_sockfd->readyfd) {
 			dsu_sockfd->ready = 1;
 
+
 			/* Remove */
 			events[i].data.fd = -1;
-			epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->readyfd, NULL);			
+			epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->readyfd, NULL);
+
+
+			continue;			
 		}
 	
 
@@ -154,9 +168,10 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 		        if (r == 0) {
 		            
 
-		            DSU_DEBUG_PRINT(" - Close on %d (%d)\n", comfds->fd, (int) getpid());            
-		            dsu_close(comfds->fd);	            
+		            DSU_DEBUG_PRINT(" - Close internal connection on %d (%d)\n", comfds->fd, (int) getpid());            
+		            dsu_close(comfds->fd);
 
+					//epoll_ctl(epollfd, EPOLL_CTL_DEL, comfds->fd, NULL);	            
 
 		            struct dsu_fd_list *_comfds = comfds;
 		            comfds = comfds->next;
@@ -181,14 +196,15 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
                 
 
 		            /* Mark file descriptor as transferred. */
+					//DSU_TEST_PRINT("Recieve port %d is ready in the new version\n", dsu_sockfd->port);
 					DSU_DEBUG_PRINT(" - port %d is ready in the new version\n", dsu_sockfd->port);
 					const char *buf = "ready";
 					if (send(dsu_sockfd->markreadyfd, &buf, 5, MSG_CONFIRM) < 0) {
 						DSU_DEBUG_PRINT(" - send to readyfd %d failed\n", dsu_sockfd->markreadyfd);
 					}
 					
-
-		            dsu_close(comfds->fd);
+					//DSU_DEBUG_PRINT(" - Close internal connection after ready signal %d failed\n", dsu_sockfd->markreadyfd);
+		            //dsu_close(comfds->fd);
 
 
 		            struct dsu_fd_list *_comfds = comfds;
@@ -199,7 +215,8 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 					continue;
             
 		        } else {
-		       
+					
+		       		DSU_TEST_PRINT("Send file descriptors %d & %d on %d \n", dsu_sockfd->fd, dsu_sockfd->comfd, comfds->fd);
 		            DSU_DEBUG_PRINT(" - Send file descriptors %d & %d on %d (%d)\n", dsu_sockfd->fd, dsu_sockfd->comfd, comfds->fd, (int) getpid());
 		            dsu_write_fd(comfds->fd, dsu_sockfd->fd, port); // handle return value;
 					dsu_write_fd(comfds->fd, dsu_sockfd->comfd, port);
@@ -300,7 +317,7 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 	/* 	The epoll_wait() system call waits for events on the epoll(7) instance referred to by the file descriptor epfd.  The buffer
 		pointed to by events is used to return information from the ready list about file descriptors in the interest list that have some
        	events available.  Up to maxevents are returned by epoll_wait(). The maxevents argument must be greater than zero. */
-	DSU_DEBUG_PRINT(" Epoll_wait() (%d)\n", (int) getpid());
+	DSU_DEBUG_PRINT(" Epoll_wait() timeout = %d (%d) maxevents = %d\n", timeout, maxevents, (int) getpid());
 
 
 	/* 	On first call to select, mark worker active and configure binded sockets. */
@@ -327,9 +344,27 @@ int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 	
 	/* Avoid changing external behaviour. Most applications cannot handle return value of 0, hence call select recursively. */
 	if (nfds == 0 && timeout < 0) {
+		DSU_DEBUG_PRINT(" Restart epoll (%d)\n", (int) getpid());
 		return epoll_wait(epfd, events, maxevents, timeout);
 	}
 	
 
 	return nfds;
 }
+
+
+//int epoll_pwait(int epfd, struct epoll_event *events, int maxevents, int timeout, const sigset_t *sigmask) {
+//	DSU_DEBUG_PRINT("epoll_pwait() (%d)\n", (int) getpid());
+//	return 0;
+//}
+
+
+//int epoll_pwait2(int epfd, struct epoll_event *events, int maxevents, const struct timespec *timeout, const sigset_t *sigmask) {
+//	DSU_DEBUG_PRINT("epoll_pwait2() (%d)\n", (int) getpid());
+//	return 0;
+//}
+
+
+
+
+

@@ -64,7 +64,7 @@ struct dsu_socket_list {
 struct dsu_state_struct {
 
 	
-	#if DSU_DEBUG == 1
+	#if defined(DEBUG) || defined(TEST)
 	FILE *logfd;
 	#endif  
 

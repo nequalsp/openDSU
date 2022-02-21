@@ -108,7 +108,8 @@ int dsu_termination_detection() {
 	struct dsu_socket_list *current = dsu_program_state.binds;
 
 	while (current != NULL) {
-		
+		//DSU_TEST_PRINT("  - Termination? ready: %d comfds: %d fds: %d\n", !current->ready, current->comfds != NULL, current->fds != NULL);
+		DSU_DEBUG_PRINT("  - Termination? ready: %d comfds: %d fds: %d (%d-%d)\n", !current->ready, current->comfds != NULL, current->fds != NULL, (int) getpid(), (int) gettid());
         if (	!current->ready
 			||  current->comfds != NULL
 			||	current->fds != NULL
@@ -219,17 +220,35 @@ int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
 static __attribute__((constructor)) void dsu_init() {
 	/*	LD_Preload constructor is called before the binary starts. Initialze the program state. */
 
+	
 	#if defined(DEBUG)
 		int size = snprintf(NULL, 0, "%s/dsu_%d.log", DEBUG, (int) getpid());
 		char logfile[size+1];
 		sprintf(logfile, "%s/dsu_%d.log", DEBUG, (int) getpid());
 	    dsu_program_state.logfd = fopen(logfile, "w");
 	    if (dsu_program_state.logfd == NULL) {
+			DSU_TEST_PRINT("Error opening debugging file (%d-%d)\n", (int) getpid(), (int) gettid());
 		    perror("DSU \"Error opening debugging file\"");
 		    exit(EXIT_FAILURE);
 	    }
 	#endif
+
+
+	#if defined(TEST)
+		int size = snprintf(NULL, 0, "%s/dsu_%d.log", TEST, (int) getpid());
+		char logfile[size+1];
+		sprintf(logfile, "%s/dsu_%d.log", TEST, (int) getpid());
+	    dsu_program_state.logfd = fopen(logfile, "w");
+	    if (dsu_program_state.logfd == NULL) {
+			DSU_TEST_PRINT("Error opening testing file (%d-%d)\n", (int) getpid(), (int) gettid());
+		    perror("DSU \"Error opening testing file\"");
+		    exit(EXIT_FAILURE);
+	    }
+	#endif
+	
+	
 	DSU_DEBUG_PRINT("INIT() (%d-%d)\n", (int) getpid(), (int) gettid());
+	DSU_TEST_PRINT("INIT() (%d-%d)\n", (int) getpid(), (int) gettid());
     
 
     dsu_program_state.write_lock = (struct flock *) calloc(1, sizeof(struct flock));
@@ -267,7 +286,6 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_epoll_wait = dlsym(RTLD_NEXT, "epoll_wait");
 	dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
 	dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
-	//dsu_epoll_ctl = dlsym(RTLD_NEXT, "epoll_ctl");
 
     
     int len = snprintf(NULL, 0, "/tmp/dsu_processes_%d.pid", (int) getpid());
@@ -417,6 +435,8 @@ int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrl
         returns a new file descriptor referring to that socket. The DSU library need to convert the file descriptor to the shadow
         file descriptor. */
     
+	DSU_DEBUG_PRINT(" - blocking? %d (%d-%d)\n", !(fcntl(sockfd, F_GETFL, 0) & O_NONBLOCK), (int) getpid(), (int) gettid()); 
+	
 	
     int sessionfd = dsu_accept(sockfd, addr, addrlen);
 	if (sessionfd == -1)
@@ -436,6 +456,8 @@ int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrl
 int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags) {
 	DSU_DEBUG_PRINT("Accept4() (%d-%d)\n", (int) getpid(), (int) gettid());
     /*  For more information see dsu_accept(). */     
+
+	DSU_DEBUG_PRINT(" - blocking? %d (%d-%d)\n", !(fcntl(sockfd, F_GETFL, 0) & O_NONBLOCK), (int) getpid(), (int) gettid()); 
 
     
     int sessionfd = dsu_accept4(sockfd, addr, addrlen, flags);

@@ -9,8 +9,9 @@ CFLAGS	+= -g2
 CC?=gcc
 
 
-#DEBUG= -D DEBUG="\"$(log_dir)\""	
-DEBUG=
+#DEBUG= -D TEST="\"$(log_dir)\""	
+DEBUG= -D DEBUG="\"$(log_dir)\""	
+#DEBUG=
 
 SRCS:=$(wildcard *.c)
 T1OBJS:=$(patsubst %.c,%.o,$(SRCS))

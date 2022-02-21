@@ -15,6 +15,13 @@
 #endif
 
 
+#ifdef TEST
+#define DSU_TEST_PRINT(format, ...) { fprintf(dsu_program_state.logfd, format, ## __VA_ARGS__); fflush(dsu_program_state.logfd);}
+#else
+#define DSU_TEST_PRINT(format, ...)
+#endif
+
+
 #define DSU_PGID 0
 #define DSU_VERSION 1
 #define DSU_TRANSFER 2

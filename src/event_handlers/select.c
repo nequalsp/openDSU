@@ -34,11 +34,12 @@ void dsu_sniff_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	if (readfds == NULL) return;
 	
 	
-	DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
-	FD_SET(dsu_sockfd->comfd, readfds);
-    if (max_fds < dsu_sockfd->comfd + 1) max_fds = dsu_sockfd->comfd + 1;
+	if (!dsu_sockfd->ready) {
+		DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
+		FD_SET(dsu_sockfd->comfd, readfds);
+		if (max_fds < dsu_sockfd->comfd + 1) max_fds = dsu_sockfd->comfd + 1;
 	
-    if (!dsu_sockfd->ready) {
+    
         DSU_DEBUG_PRINT(" - Add %d (%d-%d)\n", dsu_sockfd->readyfd, (int) getpid(), (int) gettid());
 	    FD_SET(dsu_sockfd->readyfd, readfds);
         if (max_fds < dsu_sockfd->readyfd + 1) max_fds = dsu_sockfd->readyfd + 1;
@@ -67,6 +68,8 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 	
 	/*  Race conditions could happend when a "late" fork is performed. The fork happend after 
         accepting dsu communication connection. */
+
+	// ADD: && !dsu_sockfd->ready
 	if (readfds != NULL && FD_ISSET(dsu_sockfd->comfd, readfds)) {
 		
 		++correction;
