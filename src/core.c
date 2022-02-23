@@ -108,7 +108,6 @@ int dsu_termination_detection() {
 	struct dsu_socket_list *current = dsu_program_state.binds;
 
 	while (current != NULL) {
-		//DSU_TEST_PRINT("  - Termination? ready: %d comfds: %d fds: %d\n", !current->ready, current->comfds != NULL, current->fds != NULL);
 		DSU_DEBUG_PRINT("  - Termination? ready: %d comfds: %d fds: %d (%d-%d)\n", !current->ready, current->comfds != NULL, current->fds != NULL, (int) getpid(), (int) gettid());
         if (	!current->ready
 			||  current->comfds != NULL
@@ -126,6 +125,7 @@ int dsu_termination_detection() {
 
 
 void dsu_terminate() {
+	DSU_TEST_PRINT(" - Termination (%d-%d)\n", (int) getpid(), (int) gettid());
 	DSU_DEBUG_PRINT(" - Termination (%d-%d)\n", (int) getpid(), (int) gettid());
 	/*	Different models, such as master-worker model, are used to horizontally scale the application. This
 		can either be done with threads or processes. As threads are implemented as processes on linux, 
@@ -137,11 +137,12 @@ void dsu_terminate() {
 
     DSU_DEBUG_PRINT("  - Workers: %d (pg:%d, pid:%d, tid:%d)\n", workers, (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 	if (workers == 0) {
+		DSU_TEST_PRINT("  - Kill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 		DSU_DEBUG_PRINT("  - Kill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 		killpg(getpgid(getpid()), SIGKILL);
 	}
 
-    killpg(getpid(), SIGTERM);
+    kill(getpid(), SIGTERM);
 
 }
 
