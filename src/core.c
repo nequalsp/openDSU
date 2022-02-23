@@ -145,6 +145,11 @@ void dsu_terminate() {
 
 }
 
+void dsu_init_worker() {
+	DSU_DEBUG_PRINT(" - Initialize worker (%d-%d)\n", (int) getpid(), (int) gettid());
+	dsu_program_state.processes = dup(dsu_program_state.processes);
+}
+
 
 int dsu_change_number_of_workers(int delta) {
 
@@ -154,6 +159,9 @@ int dsu_change_number_of_workers(int delta) {
     char buf[2] = {0};
     lseek(dsu_program_state.processes, 0, SEEK_SET); 
     if (read(dsu_program_state.processes, buf, 1) == -1) {
+		DSU_DEBUG_PRINT(" - Error reading process file (%d-%d)\n", (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
+    	fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.unlock);
         return -1;
     }
     
@@ -164,11 +172,14 @@ int dsu_change_number_of_workers(int delta) {
     buf[0] = size + '0';
     lseek(dsu_program_state.processes, 0, SEEK_SET);
     if (write(dsu_program_state.processes, buf, 1) == -1) {
+		DSU_DEBUG_PRINT(" - Error writing process file (%d-%d)\n", (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
+    	fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.unlock);
         return -1;
     }
     
     DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
-    fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.write_lock);
+    fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.unlock);
     
     return size;
 
@@ -181,6 +192,7 @@ int dsu_deactivate_process(void) {
 
 
 int dsu_activate_process(void) {
+	dsu_init_worker();
 	return dsu_change_number_of_workers(1);
 }
 			

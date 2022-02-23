@@ -61,6 +61,7 @@ nginx/Makefile: nginx
 		--conf-path=$(current_dir)config/nginx.conf \
 		--with-select_module \
 		--with-poll_module
+		#--with-debug
 
 nginx/objs/nginx: nginx/Makefile
 	cd nginx;\
