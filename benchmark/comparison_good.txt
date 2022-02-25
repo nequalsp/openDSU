@@ -1,0 +1,72 @@
+Nginx
+Running 30s test @ http://localhost/v1.html
+  8 threads and 64 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     3.21ms    3.71ms  26.58ms   82.36%
+    Req/Sec     4.49k   584.19     7.72k    69.49%
+  1074041 requests in 30.10s, 272.45MB read
+Requests/sec:  35682.32
+Transfer/sec:      9.05MB
+openDSU nginx
+Running 30s test @ http://localhost/v1.html
+  8 threads and 64 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     3.32ms    3.86ms  25.36ms   81.28%
+    Req/Sec     4.36k   501.29     6.41k    73.19%
+  1042932 requests in 30.10s, 264.56MB read
+Requests/sec:  34649.28
+Transfer/sec:      8.79MB
+lighttpd
+Running 30s test @ http://localhost/v1.html
+  8 threads and 64 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    17.18ms    7.48ms  59.30ms   60.57%
+    Req/Sec   461.09     83.54     2.69k    88.29%
+  110257 requests in 30.07s, 31.33MB read
+Requests/sec:   3666.70
+Transfer/sec:      1.04MB
+openDSU lighttpd
+Running 30s test @ http://localhost/v1.html
+  8 threads and 64 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency    19.17ms    7.75ms  37.14ms   53.66%
+    Req/Sec   413.87     88.92     1.60k    92.58%
+  98989 requests in 30.09s, 28.13MB read
+Requests/sec:   3289.56
+Transfer/sec:      0.93MB
+nginx
+Running 30s test @ http://localhost/v1.html
+  8 threads and 64 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   457.26us  286.52us  13.49ms   99.14%
+    Req/Sec    17.92k     1.26k   35.29k    82.59%
+  4290737 requests in 30.10s, 1.06GB read
+Requests/sec: 142553.59
+Transfer/sec:     36.16MB
+openDSU nginx
+Running 30s test @ http://localhost/v1.html
+  8 threads and 64 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   471.71us  404.60us  19.03ms   99.68%
+    Req/Sec    17.61k     0.95k   25.78k    60.54%
+  4214123 requests in 30.10s, 1.04GB read
+Requests/sec: 140004.00
+Transfer/sec:     35.52MB
+lighttpd
+Running 30s test @ http://localhost/v1.html
+  8 threads and 64 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency   750.57us  427.33us  42.52ms   98.74%
+    Req/Sec    10.42k   795.65    15.56k    80.01%
+  2494613 requests in 30.10s, 708.96MB read
+Requests/sec:  82878.82
+Transfer/sec:     23.55MB
+lighttpd
+Running 30s test @ http://localhost/v1.html
+  8 threads and 64 connections
+  Thread Stats   Avg      Stdev     Max   +/- Stdev
+    Latency     0.86ms  170.52us  27.39ms   88.68%
+    Req/Sec     9.07k   451.78    11.21k    88.07%
+  2171765 requests in 30.10s, 617.20MB read
+Requests/sec:  72153.04
+Transfer/sec:     20.51MB
