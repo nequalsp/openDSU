@@ -95,13 +95,13 @@ apache/configure: apache
 	./buildconf
 
 apache/Makefile: apache/configure
-	cd apache;\
-	./configure\
-		--prefix=$(current_dir)etc/apache\
-		--libdir=$(current_dir)etc/apache/modules\
-		--with-included-apr
-		--with-apr=$(current_dir)apache/srclib/apr
-		--with-mpm=prefork
+	cd apache; \
+	./configure \
+		--prefix=$(current_dir)etc/apache \
+		--libdir=$(current_dir)etc/apache/modules \
+		--with-included-apr \
+		--with-apr=$(current_dir)apache/srclib/apr \
+		--with-mpm=event
 
 etc/apache:
 	mkdir -p $(current_dir)etc/apache

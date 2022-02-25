@@ -23,6 +23,7 @@
 //#include <stdarg.h>
 #include <fcntl.h>
 //#include <poll.h>
+//#include <limits.h>
 
 
 #include "core.h"
@@ -51,6 +52,17 @@ int (*dsu_close)(int);
 sighandler_t (*dsu_signal)(int signum, sighandler_t handler);
 int (*dsu_sigaction)(int signum, const struct sigaction *restrict act, struct sigaction *restrict oldact);
 
+#ifdef DEBUG
+ssize_t (*dsu_read)(int, void *, size_t);
+ssize_t (*dsu_recv)(int, void *, size_t, int); 
+ssize_t (*dsu_recvfrom)(int, void *restrict, size_t, int, struct sockaddr *restrict, socklen_t *restrict);
+ssize_t (*dsu_recvmsg)(int, struct msghdr *, int);
+ssize_t (*dsu_write)(int, const void *, size_t);
+ssize_t (*dsu_send)(int, const void *, size_t, int);
+ssize_t (*dsu_sendto)(int, const void *, size_t, int, const struct sockaddr *, socklen_t);
+ssize_t (*dsu_sendmsg)(int, const struct msghdr *, int);
+int (*dsu_listen)(int, int);
+#endif
 
 int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 	DSU_DEBUG_PRINT(" - Inherit fd %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
@@ -103,7 +115,9 @@ int dsu_termination_detection() {
 		3.	The singlely linked list comdfd still contains open connections between different versions.
 		4.	The singlely linked list fds still contains open connections with clients. */
 	
+	
 	DSU_DEBUG_PRINT(" - Termination detection (%d-%d)\n", (int) getpid(), (int) gettid());
+	
 	
 	struct dsu_socket_list *current = dsu_program_state.binds;
 
@@ -135,13 +149,17 @@ void dsu_terminate() {
     
 	int workers = dsu_deactivate_process();
 
+	
     DSU_DEBUG_PRINT("  - Workers: %d (pg:%d, pid:%d, tid:%d)\n", workers, (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 	if (workers == 0) {
 		DSU_TEST_PRINT("  - Kill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 		DSU_DEBUG_PRINT("  - Kill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 		killpg(getpgid(getpid()), SIGKILL);
+		//kill(getpgid(getpid()), SIGTERM);
 	}
-
+	
+	
+	//sleep(INT_MAX);
     kill(getpid(), SIGTERM);
 
 }
@@ -300,6 +318,18 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_epoll_create1 = dlsym(RTLD_NEXT, "epoll_create1");
 	dsu_epoll_create = dlsym(RTLD_NEXT, "epoll_create");
 
+	#ifdef DEBUG
+	dsu_read = dlsym(RTLD_NEXT, "read");
+	dsu_recv = dlsym(RTLD_NEXT, "recv");
+	dsu_recvfrom = dlsym(RTLD_NEXT, "recvfrom");
+	dsu_recvmsg = dlsym(RTLD_NEXT, "recvmsg");
+	dsu_write = dlsym(RTLD_NEXT, "write");
+	dsu_send = dlsym(RTLD_NEXT, "send");
+	dsu_sendto = dlsym(RTLD_NEXT, "sendto");
+	dsu_sendmsg = dlsym(RTLD_NEXT, "sendmsg");
+	dsu_listen = dlsym(RTLD_NEXT, "listen");
+	#endif
+
     
     int len = snprintf(NULL, 0, "/tmp/dsu_processes_%d.pid", (int) getpid());
 	char temp_path[len+1];
@@ -315,7 +345,8 @@ static __attribute__((constructor)) void dsu_init() {
         perror("DSU \"Error initiating process file\"");
 		exit(EXIT_FAILURE);
     }
-    
+
+
     return;
 }
 
@@ -339,6 +370,7 @@ int sigaction(int signum, const struct sigaction *restrict act, struct sigaction
 	
 	
 	if (signum == SIGTERM) {
+		DSU_DEBUG_PRINT(" - Supressed (%d-%d)\n", (int) getpid(), (int) gettid());
 		return 0;
 	}
 
@@ -548,4 +580,71 @@ int close(int sockfd) {
 	return dsu_close(sockfd);
 
 }
+
+
+
+
+#ifdef DEBUG
+ssize_t read(int fd, void *buf, size_t count) {
+	DSU_DEBUG_PRINT("read() %d (%d-%d)\n", fd, (int) getpid(), (int) gettid());
+	return dsu_read(fd, buf, count);
+}
+
+
+ssize_t recv(int sockfd, void *buf, size_t len, int flags) {
+	DSU_DEBUG_PRINT("recv() %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+	return dsu_recv(sockfd, buf, len, flags);
+}
+
+
+ssize_t recvfrom(int sockfd, void *restrict buf, size_t len, int flags, struct sockaddr *restrict src_addr, socklen_t *restrict addrlen) {
+	DSU_DEBUG_PRINT("recvfrom() %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+	return dsu_recvfrom(sockfd, buf, len, flags, src_addr, addrlen);
+}
+
+
+ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags) {
+	DSU_DEBUG_PRINT("recvmsg() %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+	return dsu_recvmsg(sockfd, msg, flags);
+}
+
+
+ssize_t write(int fd, const void *buf, size_t count) {
+	DSU_DEBUG_PRINT("write() %d (%d-%d)\n", fd, (int) getpid(), (int) gettid());
+	return dsu_write(fd, buf, count);
+}
+
+
+ssize_t send(int sockfd, const void *buf, size_t len, int flags) {
+	DSU_DEBUG_PRINT("send() %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+	return dsu_send(sockfd, buf, len, flags);
+}
+
+
+ssize_t sendto(int sockfd, const void *buf, size_t len, int flags, const struct sockaddr *dest_addr, socklen_t addrlen) {
+	DSU_DEBUG_PRINT("sendto() %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+	return dsu_sendto(sockfd, buf, len, flags, dest_addr, addrlen);
+}
+
+
+ssize_t sendmsg(int sockfd, const struct msghdr *msg, int flags) {
+	DSU_DEBUG_PRINT("sendmsg() %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+	return dsu_sendmsg(sockfd, msg, flags);
+}
+
+int listen(int sockfd, int backlog) {
+    DSU_DEBUG_PRINT("Listen() on fd %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+	return dsu_listen(sockfd, backlog);
+	
+}
+#endif
+
+
+
+
+
+
+
+
+
 
