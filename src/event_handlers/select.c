@@ -178,23 +178,24 @@ void dsu_handle_conn(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 void dsu_pre_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
     /*  Change socket file descripter to its shadow file descriptor. */  
 	
-    if (readfds != NULL && FD_ISSET(dsu_sockfd->fd, readfds)) {
+    //if (readfds != NULL && FD_ISSET(dsu_sockfd->fd, readfds)) {
 
 		
 		/* Mark ready to be listening. */
-		if (dsu_sockfd->comfd_close > 0) {
-			DSU_DEBUG_PRINT(" - port %d is ready in on the side of the new version\n", dsu_sockfd->port);
-            DSU_DEBUG_PRINT(" - send ready %d\n", dsu_sockfd->comfd_close);
-            int buf = 1;
-            if (send(dsu_sockfd->comfd_close, &buf, sizeof(int), MSG_CONFIRM) != -1) {
-                DSU_DEBUG_PRINT(" - close %d\n", dsu_sockfd->comfd_close);
-			    dsu_close(dsu_sockfd->comfd_close);
-			    dsu_sockfd->comfd_close = -1;
-            }
-		}
+	//	if (dsu_sockfd->comfd_close > 0) {
+	//		DSU_DEBUG_PRINT(" - port %d is ready in on the side of the new version\n", dsu_sockfd->port);
+    //       DSU_DEBUG_PRINT(" - send ready %d\n", dsu_sockfd->comfd_close);
+    //        int buf = 1;
+    //        if (send(dsu_sockfd->comfd_close, &buf, sizeof(int), MSG_CONFIRM) != -1) {
+    //            DSU_DEBUG_PRINT(" - close %d\n", dsu_sockfd->comfd_close);
+	//		    dsu_close(dsu_sockfd->comfd_close);
+	//		    dsu_sockfd->comfd_close = -1;
+    //        }
+	//			dsu_sockfd->comfd_close = -1;
+	//	}
 
 
-    }
+    //}
 }
 
 
@@ -216,6 +217,24 @@ void dsu_post_select(struct dsu_socket_list *dsu_sockfd, fd_set *readfds) {
 			FD_CLR(dsu_sockfd->fd, readfds);
 			++correction;
 		}
+    }
+
+	if (readfds != NULL && FD_ISSET(dsu_sockfd->fd, readfds)) {
+
+		
+		/* Mark ready to be listening. */
+		if (dsu_sockfd->comfd_close > 0) {
+			DSU_DEBUG_PRINT(" - port %d is ready in on the side of the new version\n", dsu_sockfd->port);
+            DSU_DEBUG_PRINT(" - send ready %d\n", dsu_sockfd->comfd_close);
+            int buf = 1;
+            if (send(dsu_sockfd->comfd_close, &buf, sizeof(int), MSG_CONFIRM) != -1) {
+                DSU_DEBUG_PRINT(" - close %d\n", dsu_sockfd->comfd_close);
+			    dsu_close(dsu_sockfd->comfd_close);
+            }
+			dsu_sockfd->comfd_close = -1;
+		}
+
+
     }
 	
 

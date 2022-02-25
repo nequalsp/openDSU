@@ -24,6 +24,7 @@
 #include <fcntl.h>
 //#include <poll.h>
 //#include <limits.h>
+#include <sys/wait.h>
 
 
 #include "core.h"
@@ -64,6 +65,8 @@ ssize_t (*dsu_sendmsg)(int, const struct msghdr *, int);
 int (*dsu_listen)(int, int);
 #endif
 
+//pid_t (*dsu_waitpid)(pid_t pid, int *status, int options);
+
 int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 	DSU_DEBUG_PRINT(" - Inherit fd %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
 	/*	Connect to the previous version, based on named unix domain socket, and receive the file descriptor that is 
@@ -78,17 +81,20 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
         DSU_DEBUG_PRINT("  - Send on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
         if ( send(dsu_sockfd->comfd, &dsu_sockfd->port, sizeof(dsu_sockfd->port), 0) > 0) {
 
-
+			DSU_TEST_PRINT("  - Receive fd on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
             DSU_DEBUG_PRINT("  - Receive on %d (%d-%d)\n", dsu_sockfd->comfd, (int) getpid(), (int) gettid());
             int port = 0; int _comfd = 0; int _sockfd;
             dsu_read_fd(dsu_sockfd->comfd, &_sockfd, &port);	// Handle return value;
 			dsu_read_fd(dsu_sockfd->comfd, &_comfd, &port);
+			DSU_TEST_PRINT("  - Received fd %d & %d (%d-%d)\n", _sockfd, _comfd, (int) getpid(), (int) gettid());
 			DSU_DEBUG_PRINT("  - Received %d & %d (%d-%d)\n", _sockfd, _comfd, (int) getpid(), (int) gettid());
 
 			if (port > 0) {
 				
-				/* Connect socket to the same v-node. */
+				/* Connect socket to the same v-node, but keep socket settings. */
+				int flags = fcntl(dsu_sockfd->fd, F_GETFL);
 				if (dup2(_sockfd, dsu_sockfd->fd) == -1) {
+					fcntl(dsu_sockfd->fd, F_SETFL, flags);
 					return -1;
 				}
 
@@ -122,6 +128,7 @@ int dsu_termination_detection() {
 	struct dsu_socket_list *current = dsu_program_state.binds;
 
 	while (current != NULL) {
+		//DSU_TEST_PRINT("  - Termination? ready: %d comfds: %d fds: %d (%d-%d)\n", !current->ready, current->comfds != NULL, current->fds != NULL, (int) getpid(), (int) gettid());
 		DSU_DEBUG_PRINT("  - Termination? ready: %d comfds: %d fds: %d (%d-%d)\n", !current->ready, current->comfds != NULL, current->fds != NULL, (int) getpid(), (int) gettid());
         if (	!current->ready
 			||  current->comfds != NULL
@@ -150,17 +157,29 @@ void dsu_terminate() {
 	int workers = dsu_deactivate_process();
 
 	
-    DSU_DEBUG_PRINT("  - Workers: %d (pg:%d, pid:%d, tid:%d)\n", workers, (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 	if (workers == 0) {
-		DSU_TEST_PRINT("  - Kill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
-		DSU_DEBUG_PRINT("  - Kill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
+		DSU_TEST_PRINT("  - pgkill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT("  - pgkill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 		killpg(getpgid(getpid()), SIGKILL);
 		//kill(getpgid(getpid()), SIGTERM);
 	}
 	
 	
 	//sleep(INT_MAX);
-    kill(getpid(), SIGTERM);
+	//DSU_DEBUG_PRINT("  - waitpid() (pg:%d, pid:%d, tid:%d)\n",(int) getpgid(getpid()), (int) getpid(), (int) gettid());
+	//int status; int p = -1;
+	//do {
+	//	p = dsu_waitpid(getpgid(getpid()), &status, WUNTRACED);
+	//} while (p <= 0 && !(WIFSIGNALED(status) || WIFEXITED(status) || WIFSTOPPED(status)));
+	
+	DSU_DEBUG_PRINT("  - Sigwait() (pg:%d, pid:%d, tid:%d)\n",(int) getpgid(getpid()), (int) getpid(), (int) gettid());
+	sigset_t sigset; int sig;
+  	sigemptyset(&sigset);
+  	sigaddset(&sigset, SIGKILL);
+	sigwait(&sigset, &sig);
+	
+	//DSU_DEBUG_PRINT("  - kill() (pg:%d, pid:%d, tid:%d)\n",(int) getpgid(getpid()), (int) getpid(), (int) gettid());
+    //kill(getpid(), SIGTERM);
 
 }
 
@@ -230,8 +249,8 @@ int dsu_monitor_init(struct dsu_socket_list *dsu_sockfd) {
             
 			
 			/* 	Set socket to non-blocking, several processes might be accepting connections. */
-			int flags = fcntl(dsu_sockfd->comfd, F_GETFL, 0) | O_NONBLOCK;
-			fcntl(dsu_sockfd->comfd, F_SETFL, (char *) &flags);
+			int flags = fcntl(dsu_sockfd->comfd, F_GETFL) | O_NONBLOCK;
+			fcntl(dsu_sockfd->comfd, F_SETFL, flags);
 			
 			
             DSU_DEBUG_PRINT(" - Initialized communication on  %d fd: %d (%d-%d)\n", dsu_sockfd->port, dsu_sockfd->comfd, (int) getpid(), (int) gettid());
@@ -308,6 +327,7 @@ static __attribute__((constructor)) void dsu_init() {
 	dsu_close = dlsym(RTLD_NEXT, "close");
     dsu_sigaction = dlsym(RTLD_NEXT, "sigaction");
     dsu_signal = dlsym(RTLD_NEXT, "signal");
+	//dsu_waitpid = dlsym(RTLD_NEXT, "waitpid");
 	
 	
 	/* 	Set default function for event-handler wrapper functions. */
@@ -503,7 +523,23 @@ int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addr
     /*  For more information see dsu_accept(). */     
 
 	DSU_DEBUG_PRINT(" - blocking? %d (%d-%d)\n", !(fcntl(sockfd, F_GETFL, 0) & O_NONBLOCK), (int) getpid(), (int) gettid()); 
-
+	DSU_DEBUG_PRINT(" - cloexec? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SOCK_CLOEXEC), (int) getpid(), (int) gettid());
+	
+	//DSU_TEST_PRINT(" - SO_REUSEPORT? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_REUSEPORT), (int) getpid(), (int) gettid());
+	//DSU_TEST_PRINT(" - SO_BROADCAST? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_BROADCAST), (int) getpid(), (int) gettid());
+	//DSU_TEST_PRINT(" - SO_KEEPALIVE? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_KEEPALIVE), (int) getpid(), (int) gettid());
+	//DSU_TEST_PRINT(" - SO_LINGER? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_LINGER), (int) getpid(), (int) gettid());
+	//DSU_TEST_PRINT(" - SO_PEEK_OFF? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_PEEK_OFF), (int) getpid(), (int) gettid());
+	//DSU_TEST_PRINT(" - SO_REUSEADDR? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_REUSEADDR), (int) getpid(), (int) gettid());	
+	//DSU_TEST_PRINT(" - SO_BUSY_POLL? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_BUSY_POLL), (int) getpid(), (int) gettid());	
+	
+	//SO_REUSEPORT
+	//SO_BROADCAST
+	//SO_KEEPALIVE
+	//SO_LINGER
+	//SO_PEEK_OFF
+	//SO_REUSEADDR
+	//SO_BUSY_POLL
     
     int sessionfd = dsu_accept4(sockfd, addr, addrlen, flags);
 	if (sessionfd == -1)
@@ -639,7 +675,13 @@ int listen(int sockfd, int backlog) {
 }
 #endif
 
-
+//pid_t waitpid(pid_t pid, int *status, int options) {
+//	DSU_DEBUG_PRINT("waitpid() on pid %d and status %d (%d-%d)\n", pid, *status, (int) getpid(), (int) gettid());
+//	pid_t cpid = dsu_waitpid(pid, status, options);
+//	DSU_DEBUG_PRINT(" - pid %d (%d-%d)\n", cpid, (int) getpid(), (int) gettid());
+//	//errno = EINTR;
+//	return 0 ? cpid > 0 : cpid;
+//}
 
 
 
