@@ -44,7 +44,7 @@ def terminate_web_servers():
 		subprocess.run(["pkill", webserver])
 
 def start_apache_benchmark(f):
-	return subprocess.Popen(["ab", "-g", f, "-n", str(REQUESTS), "-H", "Connection: close", "-s", "60", "-c", "8", "http://localhost/v1.html"])
+	return subprocess.Popen(["ab", "-g", f, "-n", str(REQUESTS), "-H", "Connection: close", "-s", "60", "-c", "32", "http://localhost/v1.html"])
 
 def start_wrk_benchmark(f):
 	subprocess.run(["./wrk.o", "-t", "8", "-c", "64", "-d", "30s", "http://localhost/v1.html"], stdout=f)
@@ -152,8 +152,11 @@ if comparison:
 
 		
 if round_robin:
-	REQUESTS = 2000000
-	ROUND_ROBIN_TIME = 10
+	REQUESTS = 5500000
+	ROUND_ROBIN_TIME = 30
+
+	#REQUESTS = 500000
+	#ROUND_ROBIN_TIME = 3
 	
 		
 	terminate_web_servers()
@@ -168,6 +171,12 @@ if round_robin:
 		p = start_apache_benchmark("round_robin.plt")
 		time.sleep(ROUND_ROBIN_TIME + 5)
 
+		print('Update to apache')
+		start_apache()
+		f.write(str(int(time.time())) + "\n")
+		f.flush()
+		time.sleep(ROUND_ROBIN_TIME)
+
 		print('Update to lighttpd')
 		start_lighttpd()
 		f.write(str(int(time.time())) + "\n")
@@ -176,6 +185,12 @@ if round_robin:
 
 		print('Update to nginx')
 		start_nginx()
+		f.write(str(int(time.time())) + "\n")
+		f.flush()
+		time.sleep(ROUND_ROBIN_TIME)
+
+		print('Update to apache')
+		start_apache()
 		f.write(str(int(time.time())) + "\n")
 		f.flush()
 		time.sleep(ROUND_ROBIN_TIME)
@@ -194,28 +209,61 @@ if round_robin:
 		print('End')
 
 
-if exists("round_robin.plt") and exists("round_robin_update.plt"):
+if os.path.exists("round_robin1.plt") and os.path.exists("round_robin_update1.plt"):
 	f = {'seconds':'first', 'ctime':'mean', 'dtime':'mean', 'ttime':'mean', 'wait':'mean'}
-	df1 = pd.read_csv('round_robin.plt', sep='\t', index_col=0)
-	df2 = pd.read_csv('round_robin_update.plt', sep='\t')
+	df1 = pd.read_csv('round_robin1.plt', sep='\t', index_col=0)
+	df2 = pd.read_csv('round_robin_update1.plt', sep='\t')
 	df1.sort_values(by=['seconds'], inplace=True)
-	#df1 = df1.groupby(['seconds']).agg(f)
 	df1 = df1.groupby(['seconds']).size().reset_index(name='counts')
 	corr1 = df1['seconds'].iloc[0]
 	df1['seconds'] -= corr1
 	df2['seconds'] -= corr1
-	maximum= max(df1['counts'][5:45])
+	maximum= max(df1['counts'][5:175])
 
-	plt.plot(df1['seconds'][5:45], df1['counts'][5:45], 'k-', label='openDSU')
+	plt.plot(df1['seconds'][5:175], df1['counts'][5:175], 'k-', label='openDSU')
 	for index, row in df2.iterrows():
 		plt.plot([row['seconds'], row['seconds']], [0, maximum], 'k--') # Horizontal line
+
+	f = {'seconds':'first', 'ctime':'mean', 'dtime':'mean', 'ttime':'mean', 'wait':'mean'}
+	df3 = pd.read_csv('round_robin2.plt', sep='\t', index_col=0)
+	df4 = pd.read_csv('round_robin_update2.plt', sep='\t')
+	df3.sort_values(by=['seconds'], inplace=True)
+	df3 = df3.groupby(['seconds']).size().reset_index(name='counts')
+	corr3 = df3['seconds'].iloc[0]
+	df3['seconds'] -= corr3
+	df4['seconds'] -= corr3
+	maximum= max(df3['counts'][5:175])
+
+	plt.plot(df3['seconds'][5:175], df3['counts'][5:175], 'k-', label='openDSU')
+	#for index, row in df4.iterrows():
+	#	plt.plot([row['seconds'], row['seconds']], [0, maximum], 'k--') # Horizontal line
+
+	f = {'seconds':'first', 'ctime':'mean', 'dtime':'mean', 'ttime':'mean', 'wait':'mean'}
+	df5 = pd.read_csv('round_robin3.plt', sep='\t', index_col=0)
+	df6 = pd.read_csv('round_robin_update3.plt', sep='\t')
+	df5.sort_values(by=['seconds'], inplace=True)
+	df5 = df5.groupby(['seconds']).size().reset_index(name='counts')
+	corr5 = df5['seconds'].iloc[0]
+	df5['seconds'] -= corr5
+	df6['seconds'] -= corr5
+	maximum= max(df5['counts'][5:175])
+
+	plt.plot(df5['seconds'][5:175], df5['counts'][5:175], 'k-', label='openDSU')
+	#for index, row in df6.iterrows():
+	#	plt.plot([row['seconds'], row['seconds']], [0, maximum], 'k--') # Horizontal line
+
+	
 	plt.ylim((0,None))
+	plt.xlim((5,175))
 	plt.ylabel('Troughput in request/second')
 	plt.xlabel('Time in seconds')
-	plt.text(7, 1000, "Nginx")
-	plt.text(18, 1000, "Lighttpd")
-	plt.text(28, 1000, "Nginx")
-	plt.text(38, 1000, "Lighttpd")
+	plt.text(17, 1000, "Nginx")
+	plt.text(42, 1000, "Apache httpd")
+	plt.text(76, 1000, "Lighttpd")
+	plt.text(107, 1000, "Nginx")
+	plt.text(133, 1000, "Apache httpd")
+	plt.text(161, 1000, "Lighttpd")
+	#plt.text(38, 1000, "Lighttpd")
 	plt.show()
 
 

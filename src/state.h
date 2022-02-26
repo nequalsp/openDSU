@@ -73,10 +73,18 @@ struct dsu_state_struct {
     struct dsu_socket_list *sockets;
 	struct dsu_socket_list *binds;
     
+	int close;
+	int accept;
     
-    int processes;
-	struct flock *write_lock;
-    struct flock *unlock;
+	int ping;
+	int wakeup;
+
+	int activate;
+	int deactivate;
+
+    //int processes;
+	//struct flock *write_lock;
+    //struct flock *unlock;
     
 
 };

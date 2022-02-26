@@ -115,24 +115,27 @@ int dsu_inherit_fd(struct dsu_socket_list *dsu_sockfd) {
 
 
 int dsu_termination_detection() {
-	/*	Determine based on the global programming state whether it is possible to terminate. A version cannot terminate if:
-		1.	One socket did not increase version.
-		2.	A socket is still actively monitored.
-		3.	The singlely linked list comdfd still contains open connections between different versions.
-		4.	The singlely linked list fds still contains open connections with clients. */
-	
-	
 	DSU_DEBUG_PRINT(" - Termination detection (%d-%d)\n", (int) getpid(), (int) gettid());
-	
-	
-	struct dsu_socket_list *current = dsu_program_state.binds;
 
+	
+	int buf;
+	int r = recv(dsu_program_state.close, &buf, 1, MSG_DONTWAIT | MSG_PEEK);
+	//DSU_TEST_PRINT("  - Termination? open: %d (%d-%d)\n", r, (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT("  - Termination? open: %d (%d-%d)\n", r, (int) getpid(), (int) gettid());
+	if (r > 0) {
+		return 0;
+	}
+
+	//if (!(r == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))) {
+	//	return 0;
+	//}
+	
+
+	struct dsu_socket_list *current = dsu_program_state.binds;
 	while (current != NULL) {
-		//DSU_TEST_PRINT("  - Termination? ready: %d comfds: %d fds: %d (%d-%d)\n", !current->ready, current->comfds != NULL, current->fds != NULL, (int) getpid(), (int) gettid());
-		DSU_DEBUG_PRINT("  - Termination? ready: %d comfds: %d fds: %d (%d-%d)\n", !current->ready, current->comfds != NULL, current->fds != NULL, (int) getpid(), (int) gettid());
+		DSU_DEBUG_PRINT("  - Termination? ready: %d (%d-%d)\n", !current->ready, (int) getpid(), (int) gettid());
         if (	!current->ready
-			||  current->comfds != NULL
-			||	current->fds != NULL
+				|| current->comfds != NULL
 			 )
 			return 0;        
 
@@ -140,8 +143,19 @@ int dsu_termination_detection() {
 
 	}
 	
+	
 	return 1;
 
+}
+
+
+void ping() {
+	DSU_TEST_PRINT(" - Send ping (%d, %d)\n", (int) getpid(), (int) gettid());
+	const char buf = 'w';
+	if (send(dsu_program_state.ping, &buf, 1, MSG_CONFIRM) < 0) {
+		DSU_DEBUG_PRINT(" - Send to ping failed (%d, %d)\n", (int) getpid(), (int) gettid());
+		DSU_TEST_PRINT(" - Send to ping failed (%d, %d)\n", (int) getpid(), (int) gettid());
+	}
 }
 
 
@@ -161,21 +175,15 @@ void dsu_terminate() {
 		DSU_TEST_PRINT("  - pgkill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 		DSU_DEBUG_PRINT("  - pgkill all (pg:%d, pid:%d, tid:%d)\n", (int) getpgid(getpid()), (int) getpid(), (int) gettid());
 		killpg(getpgid(getpid()), SIGKILL);
-		//kill(getpgid(getpid()), SIGTERM);
 	}
 	
-	
-	//sleep(INT_MAX);
-	//DSU_DEBUG_PRINT("  - waitpid() (pg:%d, pid:%d, tid:%d)\n",(int) getpgid(getpid()), (int) getpid(), (int) gettid());
-	//int status; int p = -1;
-	//do {
-	//	p = dsu_waitpid(getpgid(getpid()), &status, WUNTRACED);
-	//} while (p <= 0 && !(WIFSIGNALED(status) || WIFEXITED(status) || WIFSTOPPED(status)));
+	ping();
 	
 	DSU_DEBUG_PRINT("  - Sigwait() (pg:%d, pid:%d, tid:%d)\n",(int) getpgid(getpid()), (int) getpid(), (int) gettid());
 	sigset_t sigset; int sig;
   	sigemptyset(&sigset);
   	sigaddset(&sigset, SIGKILL);
+	
 	sigwait(&sigset, &sig);
 	
 	//DSU_DEBUG_PRINT("  - kill() (pg:%d, pid:%d, tid:%d)\n",(int) getpgid(getpid()), (int) getpid(), (int) gettid());
@@ -185,43 +193,66 @@ void dsu_terminate() {
 
 void dsu_init_worker() {
 	DSU_DEBUG_PRINT(" - Initialize worker (%d-%d)\n", (int) getpid(), (int) gettid());
-	dsu_program_state.processes = dup(dsu_program_state.processes);
+	//dsu_program_state.processes = dup(dsu_program_state.processes);
 }
 
 
 int dsu_change_number_of_workers(int delta) {
 
-    DSU_DEBUG_PRINT(" < Lock process file (%d-%d)\n", (int) getpid(), (int) gettid());
-    fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.write_lock);
-    
-    char buf[2] = {0};
-    lseek(dsu_program_state.processes, 0, SEEK_SET); 
-    if (read(dsu_program_state.processes, buf, 1) == -1) {
-		DSU_DEBUG_PRINT(" - Error reading process file (%d-%d)\n", (int) getpid(), (int) gettid());
-		DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
-    	fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.unlock);
-        return -1;
-    }
-    
-    int _size = strtol(buf, NULL, 10);
-    int size = _size + delta;
-    DSU_DEBUG_PRINT(" - Number of processes %d to %d (%d-%d)\n", _size, size, (int) getpid(), (int) gettid());
-    
-    buf[0] = size + '0';
-    lseek(dsu_program_state.processes, 0, SEEK_SET);
-    if (write(dsu_program_state.processes, buf, 1) == -1) {
-		DSU_DEBUG_PRINT(" - Error writing process file (%d-%d)\n", (int) getpid(), (int) gettid());
-		DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
-    	fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.unlock);
-        return -1;
-    }
-    
-    DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
-    fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.unlock);
-    
-    return size;
+	if (delta > 0) {
+		
+		const char buf = 'a';
+		if (send(dsu_program_state.activate, &buf, 1, MSG_CONFIRM) < 0) {
+			DSU_DEBUG_PRINT(" - Write to activate failed (%d, %d)\n", (int) getpid(), (int) gettid());
+			DSU_TEST_PRINT(" - Write to activate failed (%d, %d)\n", (int) getpid(), (int) gettid());
+		}
+	
+	} else {
+		
+		char buf;
+		int r = recv(dsu_program_state.deactivate, &buf, 1, MSG_DONTWAIT);
+		if (r < 0) {
+			DSU_DEBUG_PRINT(" - Read from deactivate failed (%d, %d)\n", (int) getpid(), (int) gettid());
+			DSU_TEST_PRINT(" - Read from deactivate failed (%d, %d)\n", (int) getpid(), (int) gettid());
+		}
+
+	}
+
+	char buf;
+	return recv(dsu_program_state.deactivate, &buf, 1, MSG_DONTWAIT | MSG_PEEK) > 0;
 
 }
+    //DSU_DEBUG_PRINT(" < Lock process file (%d-%d)\n", (int) getpid(), (int) gettid());
+    //fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.write_lock);
+    
+    //char buf[2] = {0};
+    //lseek(dsu_program_state.processes, 0, SEEK_SET); 
+    //if (read(dsu_program_state.processes, buf, 1) == -1) {
+	//	DSU_DEBUG_PRINT(" - Error reading process file (%d-%d)\n", (int) getpid(), (int) gettid());
+	//	DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
+    //	fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.unlock);
+    //   return -1;
+    //}
+    
+    //int _size = strtol(buf, NULL, 10);
+    //int size = _size + delta;
+    //DSU_DEBUG_PRINT(" - Number of processes %d to %d (%d-%d)\n", _size, size, (int) getpid(), (int) gettid());
+    
+    //buf[0] = size + '0';
+    //lseek(dsu_program_state.processes, 0, SEEK_SET);
+    //if (write(dsu_program_state.processes, buf, 1) == -1) {
+	//	DSU_DEBUG_PRINT(" - Error writing process file (%d-%d)\n", (int) getpid(), (int) gettid());
+	//	DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
+    //	fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.unlock);
+    //    return -1;
+    //}
+    
+    //DSU_DEBUG_PRINT(" > Unlock process file (%d-%d)\n", (int) getpid(), (int) gettid());
+    //fcntl(dsu_program_state.processes, F_SETLKW, dsu_program_state.unlock);
+    
+    //return size;
+
+//}
 
 
 int dsu_deactivate_process(void) {
@@ -301,17 +332,17 @@ static __attribute__((constructor)) void dsu_init() {
 	DSU_TEST_PRINT("INIT() (%d-%d)\n", (int) getpid(), (int) gettid());
     
 
-    dsu_program_state.write_lock = (struct flock *) calloc(1, sizeof(struct flock));
-    dsu_program_state.write_lock->l_type = F_WRLCK;
-    dsu_program_state.write_lock->l_start = 0; 
-    dsu_program_state.write_lock->l_whence = SEEK_SET; 
-    dsu_program_state.write_lock->l_len = 0; 
+    //dsu_program_state.write_lock = (struct flock *) calloc(1, sizeof(struct flock));
+    //dsu_program_state.write_lock->l_type = F_WRLCK;
+    //dsu_program_state.write_lock->l_start = 0; 
+    //dsu_program_state.write_lock->l_whence = SEEK_SET; 
+    //dsu_program_state.write_lock->l_len = 0; 
 
-    dsu_program_state.unlock = (struct flock *) calloc(1, sizeof(struct flock));
-    dsu_program_state.unlock->l_type = F_UNLCK;
-    dsu_program_state.unlock->l_start = 0; 
-    dsu_program_state.unlock->l_whence = SEEK_SET; 
-    dsu_program_state.unlock->l_len = 0; 
+    //dsu_program_state.unlock = (struct flock *) calloc(1, sizeof(struct flock));
+    //dsu_program_state.unlock->l_type = F_UNLCK;
+    //dsu_program_state.unlock->l_start = 0; 
+    //dsu_program_state.unlock->l_whence = SEEK_SET; 
+    //dsu_program_state.unlock->l_len = 0; 
     
     
     dsu_program_state.sockets = NULL;
@@ -351,20 +382,45 @@ static __attribute__((constructor)) void dsu_init() {
 	#endif
 
     
-    int len = snprintf(NULL, 0, "/tmp/dsu_processes_%d.pid", (int) getpid());
-	char temp_path[len+1];
-	sprintf(temp_path, "/tmp/dsu_processes_%d.pid", (int) getpid());
-    dsu_program_state.processes = open(temp_path, O_RDWR | O_CREAT, 0600);
-    if (dsu_program_state.processes <= 0) {
-        perror("DSU \"Error opening process file\"");
+    //int len = snprintf(NULL, 0, "/tmp/dsu_processes_%d.pid", (int) getpid());
+	//char temp_path[len+1];
+	//sprintf(temp_path, "/tmp/dsu_processes_%d.pid", (int) getpid());
+    //dsu_program_state.processes = open(temp_path, O_RDWR | O_CREAT, 0600);
+    //if (dsu_program_state.processes <= 0) {
+    //    perror("DSU \"Error opening process file\"");
+	//	exit(EXIT_FAILURE);
+    //}
+    //unlink(temp_path);
+    //char buf = 0 + '0';
+    //if (write(dsu_program_state.processes, &buf, 1) == -1) {
+    //    perror("DSU \"Error initiating process file\"");
+	//	exit(EXIT_FAILURE);
+    //}
+
+	
+	int pair[2];
+	if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0, pair) < 0) {
+		perror("DSU \"Error generating socket pair constructor\"");
 		exit(EXIT_FAILURE);
-    }
-    unlink(temp_path);
-    char buf = 0 + '0';
-    if (write(dsu_program_state.processes, &buf, 1) == -1) {
-        perror("DSU \"Error initiating process file\"");
+	}   
+	dsu_program_state.close = pair[0];
+	dsu_program_state.accept = pair[1];
+
+	
+	if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0, pair) < 0) {
+		perror("DSU \"Error generating socket pair constructor\"");
 		exit(EXIT_FAILURE);
-    }
+	}   
+	dsu_program_state.ping = pair[0];
+	dsu_program_state.wakeup = pair[1];
+
+
+	if (socketpair(AF_UNIX, SOCK_DGRAM | SOCK_NONBLOCK, 0, pair) < 0) {
+		perror("DSU \"Error generating socket pair constructor\"");
+		exit(EXIT_FAILURE);
+	}   
+	dsu_program_state.activate = pair[0];
+	dsu_program_state.deactivate = pair[1];
 
 
     return;
@@ -519,45 +575,67 @@ int accept(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrl
 
 
 int accept4(int sockfd, struct sockaddr *restrict addr, socklen_t *restrict addrlen, int flags) {
-	DSU_DEBUG_PRINT("Accept4() (%d-%d)\n", (int) getpid(), (int) gettid());
-    /*  For more information see dsu_accept(). */     
-
-	DSU_DEBUG_PRINT(" - blocking? %d (%d-%d)\n", !(fcntl(sockfd, F_GETFL, 0) & O_NONBLOCK), (int) getpid(), (int) gettid()); 
-	DSU_DEBUG_PRINT(" - cloexec? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SOCK_CLOEXEC), (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT("Accept4() %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+    
+	int acc = dsu_accept4(sockfd, addr, addrlen, flags);
+	if (acc > 0) {
+		//DSU_TEST_PRINT(" - Client socket %d (%d-%d)\n", acc, (int) getpid(), (int) gettid()); 
+		DSU_DEBUG_PRINT(" - New client socket %d (%d-%d)\n", acc, (int) getpid(), (int) gettid());     
+		const char buf = 'a';
+		if (send(dsu_program_state.accept, &buf, 1, MSG_CONFIRM) < 0) {
+			DSU_DEBUG_PRINT(" - Send to accept failed (%d, %d)\n", (int) getpid(), (int) gettid());
+			DSU_TEST_PRINT(" - Send to accept failed (%d, %d)\n", (int) getpid(), (int) gettid());
+		}
+	}
 	
-	//DSU_TEST_PRINT(" - SO_REUSEPORT? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_REUSEPORT), (int) getpid(), (int) gettid());
-	//DSU_TEST_PRINT(" - SO_BROADCAST? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_BROADCAST), (int) getpid(), (int) gettid());
-	//DSU_TEST_PRINT(" - SO_KEEPALIVE? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_KEEPALIVE), (int) getpid(), (int) gettid());
-	//DSU_TEST_PRINT(" - SO_LINGER? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_LINGER), (int) getpid(), (int) gettid());
-	//DSU_TEST_PRINT(" - SO_PEEK_OFF? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_PEEK_OFF), (int) getpid(), (int) gettid());
-	//DSU_TEST_PRINT(" - SO_REUSEADDR? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_REUSEADDR), (int) getpid(), (int) gettid());	
-	//DSU_TEST_PRINT(" - SO_BUSY_POLL? %d (%d-%d)\n", (fcntl(sockfd, F_GETFL, 0) & SO_BUSY_POLL), (int) getpid(), (int) gettid());	
-	
-	//SO_REUSEPORT
-	//SO_BROADCAST
-	//SO_KEEPALIVE
-	//SO_LINGER
-	//SO_PEEK_OFF
-	//SO_REUSEADDR
-	//SO_BUSY_POLL
+
+	//DSU_DEBUG_PRINT(" - blocking? %d (%d-%d)\n", !(fcntl(sockfd, F_GETFL, 0) & O_NONBLOCK), (int) getpid(), (int) gettid());
     
-    int sessionfd = dsu_accept4(sockfd, addr, addrlen, flags);
-	if (sessionfd == -1)
-		return sessionfd;
+    //int sessionfd = dsu_accept4(sockfd, addr, addrlen, flags);
+	//if (sessionfd == -1)
+	//	return sessionfd;
 
     
-    DSU_DEBUG_PRINT(" - accept %d (%d-%d)\n", sessionfd, (int) getpid(), (int) gettid());
-	struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
-	if (dsu_sockfd != NULL)
-		dsu_socket_add_fds(dsu_sockfd, sessionfd, DSU_NON_INTERNAL_FD);
+    //DSU_DEBUG_PRINT(" - accept %d (%d-%d)\n", sessionfd, (int) getpid(), (int) gettid());
+	//struct dsu_socket_list *dsu_sockfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
+	//if (dsu_sockfd != NULL)
+	//	dsu_socket_add_fds(dsu_sockfd, sessionfd, DSU_NON_INTERNAL_FD);
     
 
-    return sessionfd;   
+    return acc;
 }
 
 
 int close(int sockfd) {
 	DSU_DEBUG_PRINT("Close() fd: %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+	
+	int type = -1; int listen = -1; int domain = -1; socklen_t len = sizeof(int);
+	int r = getsockopt(sockfd, SOL_SOCKET, SO_TYPE, &type, &len);
+	r += getsockopt(sockfd, SOL_SOCKET, SO_ACCEPTCONN, &listen, &len);
+	r += getsockopt(sockfd, SOL_SOCKET, SO_DOMAIN, &domain, &len);
+	//DSU_TEST_PRINT(" - Socket %d result %d Listen %d type %d domain %d (%d-%d)\n", sockfd, r, listen, type, domain, (int) getpid(), (int) gettid());
+	DSU_DEBUG_PRINT(" - Socket %d result %d Listen %d type %d domain %d (%d-%d)\n", sockfd, r, listen, type, domain, (int) getpid(), (int) gettid());
+	
+	
+	int result = dsu_close(sockfd);
+
+	
+	if (result == 0 && r == 0 && type == SOCK_STREAM && domain == AF_INET && !listen) {
+		DSU_DEBUG_PRINT(" - Close client socket %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+		//DSU_TEST_PRINT(" - Close client socket %d (%d-%d)\n", sockfd, (int) getpid(), (int) gettid());
+		char buf;
+		int r = recv(dsu_program_state.close, &buf, 1, MSG_DONTWAIT);
+		if (r <= 0) {
+			DSU_DEBUG_PRINT(" - Read from close failed (%d, %d)\n", (int) getpid(), (int) gettid());
+			DSU_TEST_PRINT(" - Read from close failed (%d, %d)\n", (int) getpid(), (int) gettid());
+		}
+
+	}
+	
+	return result;
+
+}
+	
 	/*	close() closes a file descriptor, so that it no longer refers to any file and may be reused. Therefore, the the shadow file descriptor
 		should also be removed / closed. The file descriptor can exist in:
 			1.	Unbinded sockets 	-> 	dsu_program_State.sockets
@@ -567,55 +645,55 @@ int close(int sockfd) {
 	
 		
 	/* 	Return immediately for these file descriptors. */
-    if (sockfd == STDIN_FILENO || sockfd == STDOUT_FILENO || sockfd == STDERR_FILENO) {
-        return dsu_close(sockfd);
-    }
+    //if (sockfd == STDIN_FILENO || sockfd == STDOUT_FILENO || sockfd == STDERR_FILENO) {
+    //    return dsu_close(sockfd);
+    //}
 	
 	
-	struct dsu_socket_list * dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd);
-    if (dsu_socketfd != NULL) {
-		DSU_DEBUG_PRINT(" - Unbinded socket (%d-%d)\n", (int) getpid(), (int) gettid());
-		dsu_sockets_remove_fd(&dsu_program_state.sockets, sockfd);
-		return dsu_close(sockfd);
-	}
+	//struct dsu_socket_list * dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.sockets, sockfd);
+    //if (dsu_socketfd != NULL) {
+	//	DSU_DEBUG_PRINT(" - Unbinded socket (%d-%d)\n", (int) getpid(), (int) gettid());
+	//	dsu_sockets_remove_fd(&dsu_program_state.sockets, sockfd);
+	//	return dsu_close(sockfd);
+	//}
 
 
-	dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
-	if (dsu_socketfd != NULL) {
-		DSU_DEBUG_PRINT(" - Binded socket %d (%d-%d)\n",dsu_socketfd->fd, (int) getpid(), (int) gettid());
-		if (dsu_socketfd->readyfd > 0) dsu_close(dsu_socketfd->readyfd);
-		if (dsu_socketfd->comfd >0) dsu_close(dsu_socketfd->comfd);
-		dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
-		return dsu_close(sockfd);
-	}
+	//dsu_socketfd = dsu_sockets_search_fd(dsu_program_state.binds, sockfd);
+	//if (dsu_socketfd != NULL) {
+	//	DSU_DEBUG_PRINT(" - Binded socket %d (%d-%d)\n",dsu_socketfd->fd, (int) getpid(), (int) gettid());
+	//	if (dsu_socketfd->readyfd > 0) dsu_close(dsu_socketfd->readyfd);
+	//	if (dsu_socketfd->comfd >0) dsu_close(dsu_socketfd->comfd);
+	//	dsu_sockets_remove_fd(&dsu_program_state.binds, sockfd);
+	//	return dsu_close(sockfd);
+	//}
 	
 	
-	dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_MONITOR_FD);
-	if (dsu_socketfd != NULL) {
-		DSU_DEBUG_PRINT(" - Internal master socket (%d-%d)\n", (int) getpid(), (int) gettid());
-		return dsu_close(sockfd);
-	}
+	//dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_MONITOR_FD);
+	//if (dsu_socketfd != NULL) {
+	//	DSU_DEBUG_PRINT(" - Internal master socket (%d-%d)\n", (int) getpid(), (int) gettid());
+	//	return dsu_close(sockfd);
+	//}
 
 	
-	dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_INTERNAL_FD);
-	if (dsu_socketfd != NULL) {
-		DSU_DEBUG_PRINT(" - Internal client socket (%d-%d)\n", (int) getpid(), (int) gettid());
-		dsu_socket_remove_fds(dsu_socketfd, sockfd, DSU_INTERNAL_FD);
-		return dsu_close(sockfd);
-	}
+	//dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_INTERNAL_FD);
+	//if (dsu_socketfd != NULL) {
+	//	DSU_DEBUG_PRINT(" - Internal client socket (%d-%d)\n", (int) getpid(), (int) gettid());
+	//	dsu_socket_remove_fds(dsu_socketfd, sockfd, DSU_INTERNAL_FD);
+	//	return dsu_close(sockfd);
+	//}
 
 
-	dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_NON_INTERNAL_FD);
-	if (dsu_socketfd != NULL) {
-		DSU_DEBUG_PRINT(" - Client socket (%d-%d)\n", (int) getpid(), (int) gettid());
-		dsu_socket_remove_fds(dsu_socketfd, sockfd, DSU_NON_INTERNAL_FD);
-		return dsu_close(sockfd);
-	}
+	//dsu_socketfd = dsu_sockets_search_fds(dsu_program_state.binds, sockfd, DSU_NON_INTERNAL_FD);
+	//if (dsu_socketfd != NULL) {
+	//	DSU_DEBUG_PRINT(" - Client socket (%d-%d)\n", (int) getpid(), (int) gettid());
+	//	dsu_socket_remove_fds(dsu_socketfd, sockfd, DSU_NON_INTERNAL_FD);
+	//	return dsu_close(sockfd);
+	//}
 
 
-	return dsu_close(sockfd);
+	//return dsu_close(sockfd);
 
-}
+//}
 
 
 

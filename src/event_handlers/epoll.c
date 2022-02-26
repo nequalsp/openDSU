@@ -35,10 +35,16 @@ int epoll_create(int size) {
 void dsu_epoll_internal_conn(struct dsu_socket_list *dsu_sockfd, int epollfd) {
     /*  Listen under the hood to accepted connections on public socket. A new generation can request
         file descriptors. */
-    
 
+    
 	struct epoll_event ev;
 	
+
+	ev.events = EPOLLIN;
+	ev.data.fd = dsu_program_state.wakeup;
+	epoll_ctl(epollfd, EPOLL_CTL_ADD, dsu_program_state.wakeup, &ev);
+	
+
 	if (!dsu_sockfd->ready) {
 
 		DSU_DEBUG_PRINT(" - Add %d (%d)\n", dsu_sockfd->comfd, (int) getpid());
@@ -106,7 +112,6 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 			/*  Race conditions could happend when a "late" fork is performed. The fork happend after 
         		accepting dsu communication connection. */
 			int size = sizeof(dsu_sockfd->comfd_addr);
-			DSU_TEST_PRINT(" - call ACCEPT 1 %d (%d)\n", dsu_sockfd->comfd, (int) getpid());
 			int acc = dsu_accept4(dsu_sockfd->comfd, (struct sockaddr *) &dsu_sockfd->comfd_addr, (socklen_t *) &size, SOCK_NONBLOCK);
 			
 
@@ -115,6 +120,7 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 				DSU_DEBUG_PRINT("  - Accept Internal request %d on %d (%d)\n", acc, dsu_sockfd->comfd, (int) getpid());
 				dsu_socket_add_fds(dsu_sockfd, acc, DSU_INTERNAL_FD);
 			} else {
+				DSU_TEST_PRINT("  - Accept failed (%d)\n", (int) getpid());
 				DSU_DEBUG_PRINT("  - Accept failed (%d)\n", (int) getpid());
 			}
 			
@@ -128,7 +134,28 @@ void dsu_handle_conn_epoll(struct dsu_socket_list *dsu_sockfd, int epollfd, int 
 		
 		}
 		
-	
+		
+		if (events[i].data.fd == dsu_program_state.wakeup) {
+			DSU_TEST_PRINT(" - Wakeup internal connection %d (%d)\n", dsu_program_state.wakeup, (int) getpid());
+			DSU_DEBUG_PRINT(" - Wakeup internal connection %d (%d)\n", dsu_program_state.wakeup, (int) getpid());
+			
+			char buf;
+			int r = recv(dsu_program_state.wakeup, &buf, 1, MSG_DONTWAIT);
+			if (r <= 0) {
+				DSU_DEBUG_PRINT(" - Read from close failed (%d)\n", (int) getpid());
+				DSU_TEST_PRINT(" - Read from close failed (%d)\n", (int) getpid());
+			}
+
+
+			/* Remove */
+			events[i].data.fd = -1;
+			//epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_sockfd->readyfd, NULL);
+
+			
+			continue;
+		}
+
+		
 		/*  Port is ready in the new version. */
 		if (events[i].data.fd == dsu_sockfd->readyfd) {
 			DSU_TEST_PRINT(" Mark fd %d ready (%d)\n", dsu_sockfd->readyfd, (int) getpid());
@@ -326,7 +353,8 @@ int dsu_post_epoll(int epollfd, int nfds, struct epoll_event *events) {
 	/*  Handle internal messages. */ 
     dsu_forall_sockets(dsu_program_state.binds, dsu_handle_conn_epoll, epollfd, nfds, events);
 	
-	/*  Handle internal messages. */ 
+	/*  Handle internal messages. */
+	epoll_ctl(epollfd, EPOLL_CTL_DEL, dsu_program_state.wakeup, NULL);
     dsu_forall_sockets(dsu_program_state.binds, dsu_remove_internal, epollfd);
 	
 	
