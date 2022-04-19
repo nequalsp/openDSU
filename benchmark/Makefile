@@ -146,3 +146,17 @@ clean: clean_lighttpd
 	rm -f config/nginx.conf config/apache.conf 
 	rm -f loss_of_service_updates.plt loss_of_service.plt comparison.txt
 
+
+# In progress
+vsftpd:
+	sudo apt install vsftpd
+	sudo cp /etc/vsftpd.conf  /etc/vsftpd.conf_default
+
+	sudo ftp ubuntu-ftp
+	sudo openDSU /usr/sbin/vsftpd
+
+openSSH:
+	
+
+
+
